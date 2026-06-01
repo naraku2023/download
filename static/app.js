@@ -35,6 +35,7 @@ const btnSettingsClose = document.getElementById('btn-settings-close');
 const btnSaveSettings = document.getElementById('btn-save-settings');
 const downloadDirInput = document.getElementById('download-dir-input');
 const concurrentInput = document.getElementById('concurrent-input');
+const adBlockInput = document.getElementById('adblock-input');
 const btnOpenDir = document.getElementById('btn-open-dir');
 const btnRevealDownloads = document.getElementById('btn-reveal-downloads');
 const ffmpegBanner = document.getElementById('ffmpeg-banner');
@@ -105,6 +106,12 @@ async function fetchSettings() {
         if (data.success) {
             downloadDirInput.value = data.settings.download_dir || '';
             concurrentInput.value = data.settings.max_concurrent || 3;
+            if (adBlockInput) {
+                adBlockInput.checked = data.settings.adblock_enabled !== false;
+                if (window.AndroidBridge && window.AndroidBridge.setAdBlockEnabled) {
+                    window.AndroidBridge.setAdBlockEnabled(adBlockInput.checked);
+                }
+            }
             
             const btnInstallFfmpeg = document.getElementById('btn-install-ffmpeg');
             const installProgressBar = document.getElementById('ffmpeg-install-progress-bar');
@@ -740,6 +747,7 @@ btnSettingsClose.addEventListener('click', () => {
 btnSaveSettings.addEventListener('click', async () => {
     const downloadDir = downloadDirInput.value.trim();
     const maxConcurrent = parseInt(concurrentInput.value) || 3;
+    const adblockEnabled = adBlockInput ? adBlockInput.checked : true;
     
     if (!downloadDir) {
         showToast('下载文件夹路径不能为空', 'warning');
@@ -752,13 +760,17 @@ btnSaveSettings.addEventListener('click', async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 download_dir: downloadDir,
-                max_concurrent: maxConcurrent
+                max_concurrent: maxConcurrent,
+                adblock_enabled: adblockEnabled
             })
         });
         const data = await response.json();
         
         if (data.success) {
             showToast('系统配置保存成功！', 'success');
+            if (window.AndroidBridge && window.AndroidBridge.setAdBlockEnabled) {
+                window.AndroidBridge.setAdBlockEnabled(adblockEnabled);
+            }
             settingsDrawer.classList.add('hidden');
         } else {
             showToast(`保存失败: ${data.error}`, 'error');

@@ -57,6 +57,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView txtTabCount;
     
     private final List<String> detectedVideoUrls = new ArrayList<>();
+    private boolean adBlockEnabled = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -567,6 +568,13 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
         }
+
+        @android.webkit.JavascriptInterface
+        public void setAdBlockEnabled(boolean enabled) {
+            runOnUiThread(() -> {
+                adBlockEnabled = enabled;
+            });
+        }
     }
 
     // === Android Native Video Player Launcher ===
@@ -683,7 +691,7 @@ public class MainActivity extends AppCompatActivity {
                 String lowerUrl = reqUrl.toLowerCase();
                 
                 // 1. Intercept and block ad trackers/banner networks immediately
-                if (AdBlocker.isAd(reqUrl)) {
+                if (adBlockEnabled && AdBlocker.isAd(reqUrl)) {
                     return AdBlocker.createEmptyResource();
                 }
                 

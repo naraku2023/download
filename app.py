@@ -39,6 +39,9 @@ DOWNLOADS_DIR = os.path.join(os.getcwd(), 'downloads')
 HISTORY_FILE = os.path.join(os.getcwd(), 'history.json')
 SETTINGS_FILE = os.path.join(os.getcwd(), 'settings.json')
 TASKS_FILE = os.path.join(os.getcwd(), 'tasks.json')
+THUMBNAILS_DIR = os.path.join(os.getcwd(), 'thumbnails_cache')
+if not os.path.exists(THUMBNAILS_DIR):
+    os.makedirs(THUMBNAILS_DIR)
 
 # Create necessary folders
 if not os.path.exists(DOWNLOADS_DIR):
@@ -156,7 +159,8 @@ def save_tasks_to_file():
 def load_settings():
     default_settings = {
         "download_dir": DOWNLOADS_DIR,
-        "max_concurrent": 3
+        "max_concurrent": 3,
+        "adblock_enabled": True
     }
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -381,7 +385,18 @@ def execute_download(task_id, url, format_id, settings):
             filepath = task_info.get("filepath") if task_info else ""
             if not filepath:
                 filepath = os.path.join(dl_dir, f'{safe_title}.mp4')
-                
+
+        # Try to extract keyframe from the completed video if thumbnail is missing/fallback
+        final_thumb = task_thumbnail
+        if filepath and os.path.exists(filepath):
+            if not final_thumb or final_thumb == "Unknown" or not (final_thumb.startswith("http") or final_thumb.startswith("/api/")):
+                try:
+                    local_thumb_path = os.path.join(THUMBNAILS_DIR, f"{task_id}.jpg")
+                    if extract_video_keyframe(filepath, local_thumb_path):
+                        final_thumb = f"/api/thumbnail?path={local_thumb_path}"
+                except Exception as e_thumb:
+                    print("[Keyframe] Error setting up keyframe cache:", e_thumb)
+
         if filepath and os.path.exists(filepath):
             try:
                 base_path, _ = os.path.splitext(filepath)
@@ -397,7 +412,8 @@ def execute_download(task_id, url, format_id, settings):
                 download_tasks[task_id].update({
                     "percent": 100.0,
                     "status": "finished",
-                    "filepath": filepath
+                    "filepath": filepath,
+                    "thumbnail": final_thumb
                 })
                 add_to_history(download_tasks[task_id])
         save_tasks_to_file()
@@ -720,6 +736,49 @@ def get_mp4_duration_pure(filepath):
         print("Pure Python MP4 duration probe error:", e)
     return None
 
+def extract_video_keyframe(video_path, output_image_path):
+    if not video_path or not os.path.exists(video_path):
+        return False
+    try:
+        import subprocess
+        ffmpeg_path = shutil.which("ffmpeg") or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bin', 'ffmpeg.exe')
+        if not ffmpeg_path or not os.path.exists(ffmpeg_path) and not shutil.which("ffmpeg"):
+            print("[Keyframe] ffmpeg not found, skipping frame extraction.")
+            return False
+
+        # Extract frame at 2 seconds
+        cmd = [
+            ffmpeg_path,
+            "-y",
+            "-ss", "00:00:02",
+            "-i", video_path,
+            "-vframes", "1",
+            "-q:v", "2",
+            output_image_path
+        ]
+        
+        startupinfo = None
+        if platform.system() == 'Windows':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
+        stdout, stderr = proc.communicate(timeout=8)
+        if proc.returncode == 0 and os.path.exists(output_image_path):
+            print(f"[Keyframe] Successfully extracted video frame: {output_image_path}")
+            return True
+        else:
+            cmd[4] = "00:00:00"
+            proc2 = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
+            proc2.communicate(timeout=5)
+            if proc2.returncode == 0 and os.path.exists(output_image_path):
+                print(f"[Keyframe] Successfully extracted video frame at 0s: {output_image_path}")
+                return True
+            print(f"[Keyframe] ffmpeg failed to extract frame: {stderr.decode('utf-8', errors='ignore')}")
+    except Exception as e:
+        print("[Keyframe] Exception during frame extraction:", e)
+    return False
+
 def get_video_duration(filepath):
     if not filepath or not os.path.exists(filepath):
         return None
@@ -804,6 +863,15 @@ def delete_history_route():
                 print(f"Error removing physical file {filepath}: {e}")
                 
     return jsonify({"success": True})
+
+@app.route('/api/thumbnail', methods=['GET'])
+def get_local_thumbnail():
+    filepath = request.args.get('path')
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({"success": False, "error": "File not found"}), 404
+    dir_name = os.path.dirname(filepath)
+    file_name = os.path.basename(filepath)
+    return send_from_directory(dir_name, file_name)
 
 @app.route('/api/proxy_image', methods=['GET'])
 def proxy_image():
@@ -930,6 +998,8 @@ def handle_settings():
                 settings['max_concurrent'] = int(new_data['max_concurrent'])
             except ValueError:
                 pass
+        if 'adblock_enabled' in new_data:
+            settings['adblock_enabled'] = bool(new_data['adblock_enabled'])
                 
         save_settings(settings)
         return jsonify({"success": True, "settings": settings})
