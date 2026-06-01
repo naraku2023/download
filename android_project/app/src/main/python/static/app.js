@@ -118,11 +118,17 @@ async function loadHistory() {
             data.history.forEach(item => {
                 const card = document.createElement('div');
                 card.className = 'history-card';
+                
+                let durationBadge = '';
+                if (item.duration && item.duration !== 'Unknown') {
+                    durationBadge = `<span class="history-card-duration" style="position:absolute; bottom:0.5rem; right:0.5rem; background:rgba(0,0,0,0.75); backdrop-filter:blur(4px); font-size:0.65rem; font-weight:600; color:white; padding:0.15rem 0.4rem; border-radius:4px; letter-spacing:0.5px; z-index:2;">${item.duration}</span>`;
+                }
+                
                 card.innerHTML = `
                     <div class="history-thumb-wrapper">
                         <img src="${item.thumbnail || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=60'}" alt="${item.title}" onerror="this.src='https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&auto=format&fit=crop&q=60'">
-                        <span class="history-card-platform">${item.platform || '网页'}</span>
-                        <span class="history-card-size">${item.size || '未知'}</span>
+                        <span class="history-card-size" style="position:absolute; bottom:0.5rem; left:0.5rem; right:auto; background:rgba(0,0,0,0.75); backdrop-filter:blur(4px); font-size:0.65rem; font-weight:600; color:white; padding:0.15rem 0.4rem; border-radius:4px; z-index:2;">${item.size || '未知'}</span>
+                        ${durationBadge}
                     </div>
                     <div class="history-card-body">
                         <h4 title="${item.title}">${item.title}</h4>
@@ -132,6 +138,12 @@ async function loadHistory() {
                             </button>
                             <button class="card-action-btn reveal" onclick="revealFile('${item.filepath.replace(/\\/g, '\\\\')}')">
                                 <i data-lucide="folder" style="width:14px;height:14px;"></i> 定位
+                            </button>
+                            <button class="card-action-btn source" onclick="openSourceUrl('${item.url}')">
+                                <i data-lucide="globe" style="width:14px;height:14px;"></i> 来源
+                            </button>
+                            <button class="card-action-btn delete" onclick="deleteHistory(this, '${item.id}', '${item.title.replace(/'/g, "\\'")}')">
+                                <i data-lucide="trash-2" style="width:14px;height:14px;"></i> 删除
                             </button>
                         </div>
                     </div>
@@ -192,6 +204,84 @@ async function revealFile(filepath) {
         }
     } catch (err) {
         showToast('打开文件夹异常', 'error');
+    }
+}
+
+// Open source webpage URL
+function openSourceUrl(url) {
+    if (!url) return;
+    if (window.AndroidBridge && window.AndroidBridge.openBrowserUrl) {
+        window.AndroidBridge.openBrowserUrl(url);
+    } else {
+        window.open(url, '_blank');
+    }
+}
+
+// Track timers for delete button reverts
+const deleteTimers = new Map();
+
+// Delete History Record and Physical File (Custom Double-Click confirmation to bypass native WebView alert limitations)
+async function deleteHistory(btn, id, title) {
+    if (!btn.classList.contains('confirm-active')) {
+        btn.classList.add('confirm-active');
+        btn.innerHTML = `<i data-lucide="alert-triangle" style="width:14px;height:14px;"></i> 确认？`;
+        lucide.createIcons();
+        btn.style.background = '#ef4444';
+        btn.style.color = 'white';
+        btn.style.borderColor = 'transparent';
+        
+        const timer = setTimeout(() => {
+            btn.classList.remove('confirm-active');
+            btn.innerHTML = `<i data-lucide="trash-2" style="width:14px;height:14px;"></i> 删除`;
+            lucide.createIcons();
+            btn.style.background = '';
+            btn.style.color = '';
+            btn.style.borderColor = '';
+            deleteTimers.delete(id);
+        }, 3000);
+        
+        deleteTimers.set(id, timer);
+        return;
+    }
+    
+    const timer = deleteTimers.get(id);
+    if (timer) {
+        clearTimeout(timer);
+        deleteTimers.delete(id);
+    }
+    
+    try {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner" style="width:12px;height:12px;display:inline-block;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite;"></span>`;
+        
+        const response = await fetch('/api/delete_history', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: id, delete_file: true })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showToast('已成功物理删除视频及本地记录', 'success');
+            loadHistory();
+        } else {
+            showToast(`删除失败: ${data.error}`, 'error');
+            btn.disabled = false;
+            btn.classList.remove('confirm-active');
+            btn.innerHTML = `<i data-lucide="trash-2" style="width:14px;height:14px;"></i> 删除`;
+            lucide.createIcons();
+            btn.style.background = '';
+            btn.style.color = '';
+            btn.style.borderColor = '';
+        }
+    } catch (err) {
+        showToast('删除连接请求异常', 'error');
+        btn.disabled = false;
+        btn.classList.remove('confirm-active');
+        btn.innerHTML = `<i data-lucide="trash-2" style="width:14px;height:14px;"></i> 删除`;
+        lucide.createIcons();
+        btn.style.background = '';
+        btn.style.color = '';
+        btn.style.borderColor = '';
     }
 }
 
@@ -310,7 +400,8 @@ async function startDownload(formatId, sizeStr, btn) {
             title: currentMetadata.title,
             thumbnail: currentMetadata.thumbnail,
             platform: currentMetadata.platform,
-            size: sizeStr
+            size: sizeStr,
+            duration: currentMetadata.duration || 'Unknown'
         };
         
         // Pass the real stream URL if we scraped it ourselves

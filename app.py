@@ -19,6 +19,15 @@ except ImportError:
 
 app = Flask(__name__, static_folder='static')
 
+@app.before_request
+def handle_options_preflight():
+    if request.method == 'OPTIONS':
+        response = app.make_response('')
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+        return response
+
 # Add local bin directory to system PATH so yt-dlp and shutil.which can find ffmpeg
 local_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bin')
 if os.path.isdir(local_bin):
@@ -198,15 +207,23 @@ def add_to_history(task):
     elif task.get("size") and task.get("size") != "Unknown":
         size_str = task["size"]
 
+    filepath = task.get("filepath", "")
+    duration_str = task.get("duration", "Unknown")
+    if duration_str == "Unknown" and filepath:
+        probed = get_video_duration(filepath)
+        if probed:
+            duration_str = probed
+
     item = {
         "id": task["id"],
         "url": task["url"],
         "title": task["title"],
         "thumbnail": task["thumbnail"],
-        "filepath": task.get("filepath", ""),
-        "filename": os.path.basename(task.get("filepath", "")),
+        "filepath": filepath,
+        "filename": os.path.basename(filepath),
         "size": size_str,
         "platform": task.get("platform", "Unknown"),
+        "duration": duration_str,
         "timestamp": time.time()
     }
     # Avoid duplicate titles if downloaded multiple times
@@ -549,6 +566,7 @@ def start_download():
     thumbnail = data.get('thumbnail', '')
     platform_name = data.get('platform', 'Unknown')
     size_str = data.get('size', 'Unknown')
+    duration_str = data.get('duration', 'Unknown')
     direct_url = data.get('direct_url')
     
     if not url:
@@ -572,6 +590,7 @@ def start_download():
             "total_bytes": 0,
             "size": size_str,
             "platform": platform_name,
+            "duration": duration_str,
             "filepath": "",
             "direct_url": direct_url,
             "error_msg": None
@@ -641,10 +660,135 @@ def get_progress():
         tasks = {tid: task.copy() for tid, task in download_tasks.items()}
     return jsonify({"success": True, "tasks": list(tasks.values())})
 
+def get_mp4_duration_pure(filepath):
+    try:
+        with open(filepath, 'rb') as f:
+            f.seek(0, 2)
+            file_size = f.tell()
+            f.seek(0)
+            
+            chunk_size = 5 * 1024 * 1024
+            data = b""
+            mvhd_pos = -1
+            
+            if file_size <= chunk_size * 2:
+                f.seek(0)
+                data = f.read()
+                mvhd_pos = data.find(b'mvhd')
+            else:
+                f.seek(0)
+                data_start = f.read(chunk_size)
+                mvhd_pos = data_start.find(b'mvhd')
+                if mvhd_pos != -1:
+                    data = data_start
+                else:
+                    f.seek(file_size - chunk_size)
+                    data_end = f.read(chunk_size)
+                    mvhd_pos = data_end.find(b'mvhd')
+                    if mvhd_pos != -1:
+                        data = data_end
+            
+            if mvhd_pos != -1:
+                box_start = mvhd_pos - 4
+                if box_start >= 0 and box_start + 40 <= len(data):
+                    version = data[box_start + 8]
+                    if version == 1:
+                        timescale = int.from_bytes(data[box_start + 28 : box_start + 32], 'big')
+                        duration = int.from_bytes(data[box_start + 32 : box_start + 40], 'big')
+                    else:
+                        timescale = int.from_bytes(data[box_start + 20 : box_start + 24], 'big')
+                        duration = int.from_bytes(data[box_start + 24 : box_start + 28], 'big')
+                    
+                    if timescale > 0 and duration > 0:
+                        return duration / timescale
+    except Exception as e:
+        print("Pure Python MP4 duration probe error:", e)
+    return None
+
+def get_video_duration(filepath):
+    if not filepath or not os.path.exists(filepath):
+        return None
+    # 1. Try ffprobe first
+    try:
+        import subprocess
+        ffprobe_path = shutil.which("ffprobe") or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bin', 'ffprobe.exe')
+        cmd = [
+            ffprobe_path,
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            filepath
+        ]
+        startupinfo = None
+        if platform.system() == 'Windows':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
+        stdout, _ = proc.communicate(timeout=3)
+        if proc.returncode == 0:
+            duration_seconds = float(stdout.strip())
+            if duration_seconds > 0:
+                if duration_seconds > 3600:
+                    return time.strftime('%H:%M:%S', time.gmtime(duration_seconds))
+                else:
+                    return time.strftime('%M:%S', time.gmtime(duration_seconds))
+    except Exception as e:
+        print("Error getting duration via ffprobe:", e)
+        
+    # 2. Try pure Python MP4 metadata parser fallback
+    try:
+        duration_seconds = get_mp4_duration_pure(filepath)
+        if duration_seconds and duration_seconds > 0:
+            if duration_seconds > 3600:
+                return time.strftime('%H:%M:%S', time.gmtime(duration_seconds))
+            else:
+                return time.strftime('%M:%S', time.gmtime(duration_seconds))
+    except Exception as e:
+        print("Error getting duration via pure python parser:", e)
+    return None
+
 @app.route('/api/history', methods=['GET'])
 def get_history_route():
     history = load_history()
+    updated = False
+    for item in history:
+        if "duration" not in item or item["duration"] == "Unknown":
+            dur = get_video_duration(item.get("filepath"))
+            if dur:
+                item["duration"] = dur
+                updated = True
+    if updated:
+        save_history(history)
     return jsonify({"success": True, "history": history})
+
+@app.route('/api/delete_history', methods=['POST'])
+def delete_history_route():
+    data = request.json
+    task_id = data.get('id')
+    delete_file = data.get('delete_file', True)
+    
+    if not task_id:
+        return jsonify({"success": False, "error": "ID is required"}), 400
+        
+    history = load_history()
+    new_history = [item for item in history if item["id"] != task_id]
+    target_item = next((item for item in history if item["id"] == task_id), None)
+    
+    if not target_item:
+        return jsonify({"success": False, "error": "Item not found"}), 404
+        
+    save_history(new_history)
+    
+    if delete_file and target_item.get("filepath"):
+        filepath = target_item["filepath"]
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+                print(f"[Delete] Deleted physical file: {filepath}")
+            except Exception as e:
+                print(f"Error removing physical file {filepath}: {e}")
+                
+    return jsonify({"success": True})
 
 @app.route('/api/proxy_image', methods=['GET'])
 def proxy_image():

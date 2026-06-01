@@ -556,6 +556,17 @@ public class MainActivity extends AppCompatActivity {
         public void openFolder() {
             runOnUiThread(() -> androidOpenFolder());
         }
+
+        @android.webkit.JavascriptInterface
+        public void openBrowserUrl(String url) {
+            runOnUiThread(() -> {
+                bottomNavigationView.setSelectedItemId(R.id.nav_browser);
+                WebView active = getActiveWebView();
+                if (active != null) {
+                    active.loadUrl(url);
+                }
+            });
+        }
     }
 
     // === Android Native Video Player Launcher ===

@@ -31,6 +31,10 @@
     --transition-quick: all 0.15s ease-out;
 }
 
+.hidden {
+    display: none !important;
+}
+
 /* Global Resets & Styles */
 * {
     margin: 0;
@@ -990,21 +994,23 @@ body {
 }
 
 .history-card-platform {
+    display: none !important;
+}
+
+.history-card-size {
     position: absolute;
-    top: 0.5rem;
+    bottom: 0.5rem;
     left: 0.5rem;
     background: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(4px);
     font-size: 0.65rem;
     font-weight: 600;
-    color: var(--accent-cyan);
+    color: white;
     padding: 0.15rem 0.4rem;
     border-radius: 4px;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
 }
 
-.history-card-size {
+.history-card-duration {
     position: absolute;
     bottom: 0.5rem;
     right: 0.5rem;
@@ -1015,6 +1021,32 @@ body {
     color: white;
     padding: 0.15rem 0.4rem;
     border-radius: 4px;
+}
+
+.card-action-btn.source {
+    background: rgba(6, 182, 212, 0.05);
+    border: 1px solid rgba(6, 182, 212, 0.2);
+    color: var(--accent-cyan);
+}
+
+.card-action-btn.source:hover {
+    background: rgba(6, 182, 212, 0.15);
+    border-color: var(--accent-cyan);
+    transform: translateY(-1px);
+}
+
+.card-action-btn.delete {
+    background: rgba(244, 63, 94, 0.05);
+    border: 1px solid rgba(244, 63, 94, 0.2);
+    color: var(--accent-rose, #f43f5e);
+}
+
+.card-action-btn.delete:hover {
+    background: var(--accent-rose, #f43f5e);
+    color: white;
+    border-color: transparent;
+    transform: translateY(-1px);
+    box-shadow: 0 0 10px rgba(244, 63, 94, 0.25);
 }
 
 .history-card-body {
@@ -1182,6 +1214,12 @@ body.view-settings .app-container {
 body.view-home #progress-container,
 body.view-home #history-container,
 body.view-home .app-header {
+    display: none !important;
+}
+
+/* Hide settings toggle and settings drawer on Homepage view */
+body.view-home #btn-settings-toggle,
+body.view-home #settings-drawer {
     display: none !important;
 }
 
