@@ -676,6 +676,32 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageFinished(view, pageUrl);
                 saveSessionState();
                 
+                if (adBlockEnabled && pageUrl != null && !pageUrl.startsWith("file:///android_asset")) {
+                    // Inject element-hiding CSS stylesheet and popup-defusing JS
+                    view.evaluateJavascript(
+                        "(function() {" +
+                        "  window.open = function() { return null; };" +
+                        "  var style = document.createElement('style');" +
+                        "  style.innerHTML = '" +
+                        "    .ad-banner, .ads-class, iframe[src*=\"doubleclick\"], iframe[src*=\"googleads\"], " +
+                        "    div[class*=\"ad-\"], div[id*=\"ad-\"], div[class*=\"banner\"], div[id*=\"banner\"], " +
+                        "    a[href*=\"exoclick\"], a[href*=\"onclickads\"], a[href*=\"popads\"], a[href*=\"popcash\"], " +
+                        "    div[id*=\"pop\"], div[class*=\"pop\"], .ad, .ads, .adsbygoogle" +
+                        "    { display: none !important; pointer-events: none !important; width: 0px !important; height: 0px !important; opacity: 0 !important; }" +
+                        "  ';" +
+                        "  if (document.head) { document.head.appendChild(style); }" +
+                        "  var elements = document.querySelectorAll('iframe, div, a');" +
+                        "  for (var i = 0; i < elements.length; i++) {" +
+                        "    var src = elements[i].src || elements[i].href || '';" +
+                        "    if (src.indexOf('ad') !== -1 || src.indexOf('pop') !== -1 || src.indexOf('click') !== -1) {" +
+                        "      elements[i].style.display = 'none';" +
+                        "    }" +
+                        "  }" +
+                        "})();", 
+                        null
+                    );
+                }
+
                 if (view == getActiveWebView()) {
                     btnBack.setEnabled(view.canGoBack());
                     if (!pageUrl.startsWith("file:///android_asset")) {
@@ -684,6 +710,28 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 }
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                    String url = request.getUrl().toString();
+                    if (adBlockEnabled && AdBlocker.isAd(url)) {
+                        android.util.Log.d("AdBlocker", "Blocked shouldOverrideUrlLoading: " + url);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            @SuppressWarnings("deprecation")
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                if (adBlockEnabled && AdBlocker.isAd(url)) {
+                    android.util.Log.d("AdBlocker", "Blocked shouldOverrideUrlLoading (Deprecated): " + url);
+                    return true;
+                }
+                return false;
             }
 
             @Override
