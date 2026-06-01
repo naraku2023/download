@@ -63,6 +63,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        AdBlocker.init(this);
 
         // Request runtime storage permissions for download folder write authorization
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
@@ -986,30 +987,71 @@ public class MainActivity extends AppCompatActivity {
 
     // === Lightweight High-Performance AdBlocker Helper Class ===
     private static class AdBlocker {
-        private static final String[] AD_DOMAINS = {
-            "doubleclick.net", "google-analytics.com", "googleadservices.com", "googlesyndication.com",
-            "adservice.google.com", "popads.net", "popcash.net", "exoclick.com", "juicyads.com",
-            "adsterra.com", "adskeeper.co.uk", "onclickads.net", "ad-delivery", "adserver",
-            "scorecardresearch.com", "adnxs.com", "rubiconproject.com", "pubmatic.com",
-            "openx.net", "adtech.de", "advertising.com", "quantserve.com", "ampproject.org",
-            "adform.net", "outbrain.com", "taboola.com", "mgid.com", "criteo.com",
-            "amazon-adsystem.com", "assoc-amazon.com", "amazon-adsystem", "onclickpool.com",
-            "histats.com", "hicdn.online", "hotlinking", "clickadu", "adcash", "propellerads",
-            "adbox", "smartadserver", "adcolony", "applovin", "unityads", "ironsrc", "chartboost"
-        };
+        private static final java.util.Set<String> adDomains = new java.util.HashSet<>();
+
+        public static void init(final android.content.Context context) {
+            new Thread(() -> {
+                try {
+                    java.io.InputStream is = context.getAssets().open("adblock_hosts.txt");
+                    java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(is, "UTF-8"));
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        line = line.trim();
+                        if (!line.isEmpty()) {
+                            adDomains.add(line.toLowerCase());
+                        }
+                    }
+                    reader.close();
+                    is.close();
+                    android.util.Log.d("AdBlocker", "Successfully loaded " + adDomains.size() + " ad domains from assets.");
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }).start();
+        }
 
         public static boolean isAd(String url) {
             if (url == null) return false;
-            String lowerUrl = url.toLowerCase();
             
-            // 1. Check known ad server domains
-            for (String domain : AD_DOMAINS) {
-                if (lowerUrl.contains(domain)) {
-                    return true;
+            // 1. Extract host and check against compiled StevenBlack & AdAway HashSet
+            String host = null;
+            try {
+                java.net.URL parsedUrl = new java.net.URL(url);
+                host = parsedUrl.getHost().toLowerCase();
+            } catch (Exception e) {
+                int start = url.indexOf("://");
+                if (start != -1) {
+                    String temp = url.substring(start + 3);
+                    int end = temp.indexOf("/");
+                    if (end != -1) {
+                        temp = temp.substring(0, end);
+                    }
+                    int port = temp.indexOf(":");
+                    if (port != -1) {
+                        temp = temp.substring(0, port);
+                    }
+                    host = temp.toLowerCase();
                 }
             }
-            
+
+            if (host != null) {
+                String checkHost = host;
+                while (checkHost.contains(".")) {
+                    if (adDomains.contains(checkHost)) {
+                        android.util.Log.d("AdBlocker", "Blocked Request: " + url);
+                        return true;
+                    }
+                    int firstDot = checkHost.indexOf(".");
+                    if (firstDot != -1) {
+                        checkHost = checkHost.substring(firstDot + 1);
+                    } else {
+                        break;
+                    }
+                }
+            }
+
             // 2. Check suspicious keywords in request path
+            String lowerUrl = url.toLowerCase();
             if (lowerUrl.contains("/ads/") || lowerUrl.contains("?ad_") || 
                 lowerUrl.contains("&ad_") || lowerUrl.contains("/adv/") ||
                 lowerUrl.contains("ads.js") || lowerUrl.contains("analytics.js") ||
@@ -1022,6 +1064,7 @@ public class MainActivity extends AppCompatActivity {
                     lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8")) {
                     return false;
                 }
+                android.util.Log.d("AdBlocker", "Blocked Request (Keyword): " + url);
                 return true;
             }
             
