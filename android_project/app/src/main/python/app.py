@@ -159,12 +159,18 @@ def load_settings():
     default_settings = {
         "download_dir": DOWNLOADS_DIR,
         "max_concurrent": 3,
-        "adblock_enabled": True
+        "adblock_enabled": True,
+        "popup_block_enabled": True,
+        "picker_block_enabled": True
     }
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
+                if "popup_block_enabled" not in settings:
+                    settings["popup_block_enabled"] = True
+                if "picker_block_enabled" not in settings:
+                    settings["picker_block_enabled"] = True
                 if not os.path.exists(settings.get("download_dir", "")):
                     os.makedirs(settings["download_dir"], exist_ok=True)
                 return settings
@@ -1044,6 +1050,10 @@ def handle_settings():
                 pass
         if 'adblock_enabled' in new_data:
             settings['adblock_enabled'] = bool(new_data['adblock_enabled'])
+        if 'popup_block_enabled' in new_data:
+            settings['popup_block_enabled'] = bool(new_data['popup_block_enabled'])
+        if 'picker_block_enabled' in new_data:
+            settings['picker_block_enabled'] = bool(new_data['picker_block_enabled'])
         save_settings(settings)
         return jsonify({"success": True, "settings": settings})
 

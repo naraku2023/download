@@ -36,6 +36,8 @@ const btnSaveSettings = document.getElementById('btn-save-settings');
 const downloadDirInput = document.getElementById('download-dir-input');
 const concurrentInput = document.getElementById('concurrent-input');
 const adBlockInput = document.getElementById('adblock-input');
+const popupBlockInput = document.getElementById('popup-block-input');
+const pickerBlockInput = document.getElementById('picker-block-input');
 const btnOpenDir = document.getElementById('btn-open-dir');
 const btnRevealDownloads = document.getElementById('btn-reveal-downloads');
 const ffmpegBanner = document.getElementById('ffmpeg-banner');
@@ -108,8 +110,24 @@ async function fetchSettings() {
             concurrentInput.value = data.settings.max_concurrent || 3;
             if (adBlockInput) {
                 adBlockInput.checked = data.settings.adblock_enabled !== false;
-                if (window.AndroidBridge && window.AndroidBridge.setAdBlockEnabled) {
+            }
+            if (popupBlockInput) {
+                popupBlockInput.checked = data.settings.popup_block_enabled !== false;
+            }
+            if (pickerBlockInput) {
+                pickerBlockInput.checked = data.settings.picker_block_enabled !== false;
+            }
+            
+            // Sync with Android native bridge if available on startup
+            if (window.AndroidBridge) {
+                if (window.AndroidBridge.setAdBlockEnabled && adBlockInput) {
                     window.AndroidBridge.setAdBlockEnabled(adBlockInput.checked);
+                }
+                if (window.AndroidBridge.setPopupBlockEnabled && popupBlockInput) {
+                    window.AndroidBridge.setPopupBlockEnabled(popupBlockInput.checked);
+                }
+                if (window.AndroidBridge.setPickerBlockEnabled && pickerBlockInput) {
+                    window.AndroidBridge.setPickerBlockEnabled(pickerBlockInput.checked);
                 }
             }
             
@@ -748,6 +766,8 @@ btnSaveSettings.addEventListener('click', async () => {
     const downloadDir = downloadDirInput.value.trim();
     const maxConcurrent = parseInt(concurrentInput.value) || 3;
     const adblockEnabled = adBlockInput ? adBlockInput.checked : true;
+    const popupBlockEnabled = popupBlockInput ? popupBlockInput.checked : true;
+    const pickerBlockEnabled = pickerBlockInput ? pickerBlockInput.checked : true;
     
     if (!downloadDir) {
         showToast('下载文件夹路径不能为空', 'warning');
@@ -761,15 +781,25 @@ btnSaveSettings.addEventListener('click', async () => {
             body: JSON.stringify({
                 download_dir: downloadDir,
                 max_concurrent: maxConcurrent,
-                adblock_enabled: adblockEnabled
+                adblock_enabled: adblockEnabled,
+                popup_block_enabled: popupBlockEnabled,
+                picker_block_enabled: pickerBlockEnabled
             })
         });
         const data = await response.json();
         
         if (data.success) {
             showToast('系统配置保存成功！', 'success');
-            if (window.AndroidBridge && window.AndroidBridge.setAdBlockEnabled) {
-                window.AndroidBridge.setAdBlockEnabled(adblockEnabled);
+            if (window.AndroidBridge) {
+                if (window.AndroidBridge.setAdBlockEnabled) {
+                    window.AndroidBridge.setAdBlockEnabled(adblockEnabled);
+                }
+                if (window.AndroidBridge.setPopupBlockEnabled) {
+                    window.AndroidBridge.setPopupBlockEnabled(popupBlockEnabled);
+                }
+                if (window.AndroidBridge.setPickerBlockEnabled) {
+                    window.AndroidBridge.setPickerBlockEnabled(pickerBlockEnabled);
+                }
             }
             settingsDrawer.classList.add('hidden');
         } else {

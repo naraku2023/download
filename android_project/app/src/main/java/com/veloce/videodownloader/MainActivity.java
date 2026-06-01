@@ -60,6 +60,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean adBlockEnabled = true;
     private ImageButton btnAdblockSelect;
     private boolean isAdBlockSelectMode = false;
+    private boolean popupBlockEnabled = true;
+    private boolean pickerBlockEnabled = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -582,6 +584,23 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @android.webkit.JavascriptInterface
+        public void setPopupBlockEnabled(boolean enabled) {
+            runOnUiThread(() -> {
+                popupBlockEnabled = enabled;
+            });
+        }
+
+        @android.webkit.JavascriptInterface
+        public void setPickerBlockEnabled(boolean enabled) {
+            runOnUiThread(() -> {
+                pickerBlockEnabled = enabled;
+                if (btnAdblockSelect != null) {
+                    btnAdblockSelect.setVisibility(enabled ? android.view.View.VISIBLE : android.view.View.GONE);
+                }
+            });
+        }
+
+        @android.webkit.JavascriptInterface
         public void requestElementBlock(final String hostname, final String selector, final String tagName) {
             runOnUiThread(() -> {
                 new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
@@ -710,7 +729,7 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageFinished(view, pageUrl);
                 saveSessionState();
                 
-                if (adBlockEnabled && pageUrl != null && !pageUrl.startsWith("file:///android_asset")) {
+                if (popupBlockEnabled && pageUrl != null && !pageUrl.startsWith("file:///android_asset")) {
                     // Inject element-hiding CSS stylesheet and popup-defusing JS
                     view.evaluateJavascript(
                         "(function() {" +
