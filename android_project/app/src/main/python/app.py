@@ -375,52 +375,13 @@ def make_progress_hook(task_id):
             if should_save:
                 save_tasks_to_file()
         elif d['status'] == 'finished':
-            filepath = d.get('filename', '')
-            if filepath:
-                try:
-                    # Clean up any leftover image/thumbnail files in the download directory
-                    base_path, _ = os.path.splitext(filepath)
-                    for ext in ['.jpg', '.jpeg', '.png', '.webp', '.jpg.temp', '.webp.temp']:
-                        img_path = base_path + ext
-                        if os.path.exists(img_path):
-                            os.remove(img_path)
-                            print(f"[Cleanup] Deleted leftover cover image in download dir: {img_path}")
-                except Exception as ce:
-                    print(f"[Cleanup] Error deleting cover image: {ce}")
-                    
-                # Export completed and merged file to public storage (Download/VeloceDownloads)
-                # to bypass Android Scoped Storage / SELinux execution blocks on native executables like ffmpeg
-                try:
-                    from android.os import Environment
-                    public_dir = os.path.join(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath(), "VeloceDownloads")
-                    os.makedirs(public_dir, exist_ok=True)
-                    
-                    filename = os.path.basename(filepath)
-                    public_filepath = os.path.join(public_dir, filename)
-                    
-                    # Prevent overwriting crash if a file from a previous installation exists
-                    if os.path.exists(public_filepath):
-                        base, ext = os.path.splitext(filename)
-                        public_filepath = os.path.join(public_dir, f"{base}_{int(time.time())}{ext}")
-                        
-                    shutil.copy2(filepath, public_filepath)
-                    try:
-                        os.remove(filepath)
-                    except Exception:
-                        pass
-                    filepath = public_filepath
-                    print(f"[Android Export] Successfully exported video to public storage: {public_filepath}")
-                except Exception as e_export:
-                    print(f"[Android Export] Export skipped or failed:", e_export)
-                    
+            # Do not perform final export/cleanup/history write here to avoid deleting raw chunks before FFmpeg merges them.
+            # Instead, just update the percent state in memory.
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id].update({
-                        "percent": 100.0,
-                        "status": "finished",
-                        "filepath": filepath
+                        "percent": 100.0
                     })
-                    add_to_history(download_tasks[task_id])
             save_tasks_to_file()
     return progress_hook
 
@@ -546,6 +507,58 @@ def execute_download(task_id, url, format_id, settings):
                         "filepath": filename
                     })
                 ydl.download([download_url])
+
+        # === Post-Download File Cleanup & Android Export (Runs only AFTER successful completion of ydl.download) ===
+        with tasks_lock:
+            task_info = download_tasks.get(task_id)
+            filepath = task_info.get("filepath") if task_info else ""
+            if not filepath:
+                # Fallback path if not set during extract_info
+                filepath = os.path.join(dl_dir, f'{safe_title}.mp4')
+
+        final_filepath = filepath
+        if filepath and os.path.exists(filepath):
+            try:
+                base_path, _ = os.path.splitext(filepath)
+                for ext in ['.jpg', '.jpeg', '.png', '.webp', '.jpg.temp', '.webp.temp']:
+                    img_path = base_path + ext
+                    if os.path.exists(img_path):
+                        os.remove(img_path)
+            except Exception as ce:
+                print("[Cleanup] Error deleting cover image:", ce)
+
+            try:
+                from android.os import Environment
+                public_dir = os.path.join(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath(), "VeloceDownloads")
+                os.makedirs(public_dir, exist_ok=True)
+                
+                filename = os.path.basename(filepath)
+                public_filepath = os.path.join(public_dir, filename)
+                
+                if os.path.exists(public_filepath):
+                    base, ext = os.path.splitext(filename)
+                    public_filepath = os.path.join(public_dir, f"{base}_{int(time.time())}{ext}")
+                    
+                shutil.copy2(filepath, public_filepath)
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
+                final_filepath = public_filepath
+                print(f"[Android Export] Successfully exported video to public storage: {public_filepath}")
+            except Exception as e_export:
+                print("[Android Export] Export skipped or failed:", e_export)
+
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id].update({
+                    "percent": 100.0,
+                    "status": "finished",
+                    "filepath": final_filepath
+                })
+                add_to_history(download_tasks[task_id])
+        save_tasks_to_file()
+
     except Exception as e:
         err_msg = str(e)
         with tasks_lock:

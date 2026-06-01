@@ -279,26 +279,13 @@ def make_progress_hook(task_id):
             if should_save:
                 save_tasks_to_file()
         elif d['status'] == 'finished':
-            filepath = d.get('filename', '')
-            if filepath:
-                try:
-                    # Clean up any leftover image/thumbnail files in the download directory
-                    base_path, _ = os.path.splitext(filepath)
-                    for ext in ['.jpg', '.jpeg', '.png', '.webp', '.jpg.temp', '.webp.temp']:
-                        img_path = base_path + ext
-                        if os.path.exists(img_path):
-                            os.remove(img_path)
-                            print(f"[Cleanup] Deleted leftover cover image in download dir: {img_path}")
-                except Exception as ce:
-                    print(f"[Cleanup] Error deleting cover image: {ce}")
+            # Do not perform final cleanup or history write here to avoid deleting/handling files before FFmpeg merges them.
+            # Instead, just update the percent state in memory.
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id].update({
-                        "percent": 100.0,
-                        "status": "finished",
-                        "filepath": filepath
+                        "percent": 100.0
                     })
-                    add_to_history(download_tasks[task_id])
             save_tasks_to_file()
     return progress_hook
 
@@ -386,6 +373,34 @@ def execute_download(task_id, url, format_id, settings):
                         "filepath": filename
                     })
                 ydl.download([download_url])
+
+        # === Post-Download File Cleanup & History Addition ===
+        # Determine the final downloaded filepath
+        with tasks_lock:
+            task_info = download_tasks.get(task_id)
+            filepath = task_info.get("filepath") if task_info else ""
+            if not filepath:
+                filepath = os.path.join(dl_dir, f'{safe_title}.mp4')
+                
+        if filepath and os.path.exists(filepath):
+            try:
+                base_path, _ = os.path.splitext(filepath)
+                for ext in ['.jpg', '.jpeg', '.png', '.webp', '.jpg.temp', '.webp.temp']:
+                    img_path = base_path + ext
+                    if os.path.exists(img_path):
+                        os.remove(img_path)
+            except Exception as ce:
+                print("[Cleanup] Error deleting cover image:", ce)
+
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id].update({
+                    "percent": 100.0,
+                    "status": "finished",
+                    "filepath": filepath
+                })
+                add_to_history(download_tasks[task_id])
+        save_tasks_to_file()
 
     except Exception as e:
         err_msg = str(e)
