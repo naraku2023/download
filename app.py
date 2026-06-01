@@ -19,6 +19,12 @@ except ImportError:
 
 app = Flask(__name__, static_folder='static')
 
+# Add local bin directory to system PATH so yt-dlp and shutil.which can find ffmpeg
+local_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bin')
+if os.path.isdir(local_bin):
+    os.environ["PATH"] = local_bin + os.pathsep + os.environ["PATH"]
+
+
 # Configurations
 DOWNLOADS_DIR = os.path.join(os.getcwd(), 'downloads')
 HISTORY_FILE = os.path.join(os.getcwd(), 'history.json')
@@ -322,13 +328,14 @@ def execute_download(task_id, url, format_id, settings):
         'socket_timeout': 30,
         'retries': 5,
         'fragment_retries': 10,
+        'hls_prefer_native': True,  # Force native HLS downloader for robust HTTPS compatibility via Python urllib
     }
 
     # Special handling for direct_url (scraped streams like rou.video disguised as .jpg)
     if direct_url:
         ydl_opts['format'] = 'best'
-        ydl_opts['hls_prefer_native'] = not ffmpeg_available
-        ydl_opts['outtmpl'] = os.path.join(dl_dir, f'{safe_title}.%(ext)s')
+        ydl_opts['hls_prefer_native'] = True
+        ydl_opts['outtmpl'] = os.path.join(dl_dir, f'{safe_title}.mp4')
         ydl_opts['http_headers'] = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Referer': 'https://rou.video/',
@@ -752,6 +759,143 @@ def handle_settings():
                 
         save_settings(settings)
         return jsonify({"success": True, "settings": settings})
+
+# FFmpeg Auto Installer State
+ffmpeg_install_state = {
+    "status": "idle",       # "idle", "downloading", "extracting", "success", "error"
+    "progress": 0,          # percentage
+    "message": ""           # text
+}
+ffmpeg_install_lock = threading.Lock()
+
+def download_ffmpeg_thread():
+    global ffmpeg_install_state
+    import urllib.request
+    import zipfile
+    
+    zip_url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+    local_zip = os.path.join(os.getcwd(), 'ffmpeg_temp.zip')
+    bin_dir = os.path.join(os.getcwd(), 'bin')
+    
+    try:
+        with ffmpeg_install_lock:
+            ffmpeg_install_state.update({
+                "status": "downloading",
+                "progress": 0,
+                "message": "正在连接 FFmpeg 官方高速下载源..."
+            })
+        
+        req = urllib.request.Request(
+            zip_url,
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        )
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            total_size = int(response.info().get('Content-Length', 0))
+            downloaded = 0
+            block_size = 1024 * 64  # 64KB chunks
+            
+            with open(local_zip, 'wb') as f:
+                while True:
+                    buffer = response.read(block_size)
+                    if not buffer:
+                        break
+                    f.write(buffer)
+                    downloaded += len(buffer)
+                    if total_size > 0:
+                        pct = int((downloaded / total_size) * 100)
+                        # Cap at 95% during download to leave room for extraction
+                        pct = min(pct, 95)
+                        with ffmpeg_install_lock:
+                            ffmpeg_install_state.update({
+                                "progress": pct,
+                                "message": f"正在下载 FFmpeg... {pct}%"
+                            })
+                    else:
+                        mb = downloaded // (1024 * 1024)
+                        with ffmpeg_install_lock:
+                            ffmpeg_install_state.update({
+                                "message": f"正在下载 FFmpeg... 已下载 {mb} MB"
+                            })
+        
+        # Extract files
+        with ffmpeg_install_lock:
+            ffmpeg_install_state.update({
+                "status": "extracting",
+                "progress": 96,
+                "message": "下载完成，正在解压部署二进制文件..."
+            })
+            
+        if not os.path.exists(bin_dir):
+            os.makedirs(bin_dir)
+            
+        extracted_count = 0
+        with zipfile.ZipFile(local_zip, 'r') as zip_ref:
+            for file_info in zip_ref.infolist():
+                filename = os.path.basename(file_info.filename)
+                if filename in ['ffmpeg.exe', 'ffprobe.exe']:
+                    # Extract directly to bin_dir/filename
+                    with zip_ref.open(file_info) as source, open(os.path.join(bin_dir, filename), 'wb') as target:
+                        shutil.copyfileobj(source, target)
+                    extracted_count += 1
+        
+        # Clean up zip
+        if os.path.exists(local_zip):
+            os.remove(local_zip)
+            
+        if extracted_count < 2:
+            raise Exception("解压错误：未能从下载的 essentials 包中提取到 ffmpeg.exe 或 ffprobe.exe")
+            
+        # Add to PATH dynamically for current process
+        if bin_dir not in os.environ["PATH"]:
+            os.environ["PATH"] = bin_dir + os.pathsep + os.environ["PATH"]
+            
+        with ffmpeg_install_lock:
+            ffmpeg_install_state.update({
+                "status": "success",
+                "progress": 100,
+                "message": "FFmpeg 便携包部署成功！环境已就绪。"
+            })
+            
+    except Exception as e:
+        if os.path.exists(local_zip):
+            try:
+                os.remove(local_zip)
+            except Exception:
+                pass
+        with ffmpeg_install_lock:
+            ffmpeg_install_state.update({
+                "status": "error",
+                "progress": 0,
+                "message": f"安装失败：{str(e)}"
+            })
+
+@app.route('/api/install_ffmpeg', methods=['POST'])
+def trigger_install_ffmpeg():
+    # Only allow for Windows OS in this endpoint, others should have pre-bundled/pre-installed binaries
+    if platform.system() != 'Windows':
+        return jsonify({"success": False, "error": "本自动安装仅适用于 Windows 系统，其他系统请预先安装 FFmpeg"}), 400
+        
+    with ffmpeg_install_lock:
+        if ffmpeg_install_state["status"] in ["downloading", "extracting"]:
+            return jsonify({"success": True, "message": "已有正在进行的安装任务"})
+            
+        ffmpeg_install_state.update({
+            "status": "downloading",
+            "progress": 0,
+            "message": "准备下载..."
+        })
+        
+    thread = threading.Thread(target=download_ffmpeg_thread)
+    thread.daemon = True
+    thread.start()
+    return jsonify({"success": True})
+
+@app.route('/api/install_status', methods=['GET'])
+def get_install_ffmpeg_status():
+    with ffmpeg_install_lock:
+        state = ffmpeg_install_state.copy()
+    return jsonify({"success": True, "state": state})
 
 if __name__ == '__main__':
     # Restore tasks queue from tasks.json on startup

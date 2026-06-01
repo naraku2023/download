@@ -39,3 +39,6 @@ downloads/
 # Local settings and runtime data
 history.json
 settings.json
+tasks.json
+/bin/
+Android-FFmpeg-Prebuilt-main/

@@ -29,6 +29,17 @@ TASKS_FILE = os.path.join(app_dir, 'tasks.json')
 # We will initialize DOWNLOADS_DIR dynamically inside run_server
 DOWNLOADS_DIR = ""
 
+def is_ffmpeg_ready():
+    try:
+        from com.chaquo.python import Python
+        context = Python.getPlatform().getApplication()
+        private_bin = os.path.join(context.getFilesDir().getAbsolutePath(), 'bin')
+        ffmpeg_bin_path = os.path.join(private_bin, 'ffmpeg')
+        return os.path.exists(ffmpeg_bin_path)
+    except Exception:
+        return shutil.which("ffmpeg") is not None
+
+
 # Thread-safe download tracking
 download_tasks = {}
 tasks_lock = threading.Lock()
@@ -260,6 +271,32 @@ def make_progress_hook(task_id):
                             print(f"[Cleanup] Deleted leftover cover image in download dir: {img_path}")
                 except Exception as ce:
                     print(f"[Cleanup] Error deleting cover image: {ce}")
+                    
+                # Export completed and merged file to public storage (Download/VeloceDownloads)
+                # to bypass Android Scoped Storage / SELinux execution blocks on native executables like ffmpeg
+                try:
+                    from android.os import Environment
+                    public_dir = os.path.join(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath(), "VeloceDownloads")
+                    os.makedirs(public_dir, exist_ok=True)
+                    
+                    filename = os.path.basename(filepath)
+                    public_filepath = os.path.join(public_dir, filename)
+                    
+                    # Prevent overwriting crash if a file from a previous installation exists
+                    if os.path.exists(public_filepath):
+                        base, ext = os.path.splitext(filename)
+                        public_filepath = os.path.join(public_dir, f"{base}_{int(time.time())}{ext}")
+                        
+                    shutil.copy2(filepath, public_filepath)
+                    try:
+                        os.remove(filepath)
+                    except Exception:
+                        pass
+                    filepath = public_filepath
+                    print(f"[Android Export] Successfully exported video to public storage: {public_filepath}")
+                except Exception as e_export:
+                    print(f"[Android Export] Export skipped or failed:", e_export)
+                    
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id].update({
@@ -290,7 +327,7 @@ def execute_download(task_id, url, format_id, settings):
                 direct_url = fresh_url
     
     download_url = direct_url if direct_url else url
-    ffmpeg_available = shutil.which("ffmpeg") is not None
+    ffmpeg_available = is_ffmpeg_ready()
     safe_title = "".join(c if c.isalnum() or c in ' -_.' else '_' for c in task_title)[:80]
 
     # Download thumbnail locally with cookies/UA to bypass 403 hotlink blocks
@@ -336,7 +373,7 @@ def execute_download(task_id, url, format_id, settings):
         'socket_timeout': 30,
         'retries': 5,
         'fragment_retries': 10,
-        'fixup': 'never', # Disable post-processing format conversions requiring ffmpeg
+        'hls_prefer_native': True,  # Force native HLS downloader for robust HTTPS compatibility via Python urllib
     }
 
     # Generate custom browser headers
@@ -361,8 +398,8 @@ def execute_download(task_id, url, format_id, settings):
     # Configure formats based on format_id
     if direct_url:
         ydl_opts['format'] = 'best'
-        ydl_opts['hls_prefer_native'] = not ffmpeg_available
-        ydl_opts['outtmpl'] = os.path.join(dl_dir, f'{safe_title}.%(ext)s')
+        ydl_opts['hls_prefer_native'] = True
+        ydl_opts['outtmpl'] = os.path.join(dl_dir, f'{safe_title}.mp4')
     elif format_id:
         if ffmpeg_available:
             ydl_opts['format'] = f"{format_id}+bestaudio/best"
@@ -690,11 +727,48 @@ def get_history_route():
 def open_downloads_folder():
     return jsonify({"success": True, "folder": DOWNLOADS_DIR})
 
+@app.route('/api/debug_ffmpeg', methods=['GET'])
+def debug_ffmpeg():
+    diagnostic = {}
+    try:
+        from com.chaquo.python import Python
+        context = Python.getPlatform().getApplication()
+        
+        native_lib_dir = context.getApplicationInfo().nativeLibraryDir
+        libffmpeg_path = os.path.join(native_lib_dir, 'libffmpeg.so')
+        diagnostic["lib_so"] = os.path.exists(libffmpeg_path)
+        if os.path.exists(libffmpeg_path):
+            diagnostic["lib_so_size"] = os.path.getsize(libffmpeg_path)
+            
+        private_bin = os.path.join(context.getFilesDir().getAbsolutePath(), 'bin')
+        ffmpeg_bin_path = os.path.join(private_bin, 'ffmpeg')
+        diagnostic["bin_file"] = os.path.exists(ffmpeg_bin_path)
+        if os.path.exists(ffmpeg_bin_path):
+            diagnostic["bin_size"] = os.path.getsize(ffmpeg_bin_path)
+            diagnostic["bin_exec"] = os.access(ffmpeg_bin_path, os.X_OK)
+            
+        asset_manager = context.getAssets()
+        try:
+            input_stream = asset_manager.open("bin/ffmpeg")
+            diagnostic["asset_file"] = True
+            input_stream.close()
+        except Exception as e_asset:
+            diagnostic["asset_file"] = False
+            diagnostic["asset_err"] = str(e_asset)[:100]
+            
+        diagnostic["PATH"] = os.environ.get("PATH", "")[:100]
+        diagnostic["arch"] = platform.machine()
+        
+    except Exception as e:
+        diagnostic["err"] = str(e)[:150]
+        
+    return jsonify({"success": True, "diagnostic": diagnostic})
+
 @app.route('/api/settings', methods=['GET', 'POST'])
 def handle_settings():
     if request.method == 'GET':
         settings = load_settings()
-        settings["ffmpeg_installed"] = shutil.which("ffmpeg") is not None
+        settings["ffmpeg_installed"] = is_ffmpeg_ready()
         return jsonify({"success": True, "settings": settings})
     elif request.method == 'POST':
         new_data = request.json
@@ -725,18 +799,64 @@ def add_cors_headers(response):
 
 def run_server():
     global DOWNLOADS_DIR, download_tasks
-    # Resolve Android Downloads directory with robust fallback
+    
+    # Setup private FFmpeg binary on Android dynamically
     try:
-        from android.os import Environment
-        DOWNLOADS_DIR = os.path.join(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath(), "VeloceDownloads")
+        from com.chaquo.python import Python
+        context = Python.getPlatform().getApplication()
+        native_lib_dir = context.getApplicationInfo().nativeLibraryDir
+        private_bin = os.path.join(context.getFilesDir().getAbsolutePath(), 'bin')
+        os.makedirs(private_bin, exist_ok=True)
+        
+        ffmpeg_bin_path = os.path.join(private_bin, 'ffmpeg')
+        libffmpeg_path = os.path.join(native_lib_dir, 'libffmpeg.so')
+        
+        # 1. Try unpacking precompiled ffmpeg packaged as libffmpeg.so inside native jniLibs
+        if os.path.exists(libffmpeg_path):
+            if not os.path.exists(ffmpeg_bin_path) or os.path.getsize(ffmpeg_bin_path) != os.path.getsize(libffmpeg_path):
+                shutil.copy2(libffmpeg_path, ffmpeg_bin_path)
+                os.chmod(ffmpeg_bin_path, 0o755)
+                print("[Android FFmpeg] Successfully unpacked executable ffmpeg from native library directory.")
+        else:
+            # 2. Fallback: try unpacking from main assets/bin/ffmpeg if present
+            asset_manager = context.getAssets()
+            try:
+                input_stream = asset_manager.open("bin/ffmpeg")
+                with open(ffmpeg_bin_path, 'wb') as dest_file:
+                    buffer = bytearray(1024 * 64)
+                    while True:
+                        bytes_read = input_stream.read(buffer)
+                        if bytes_read == -1 or bytes_read == 0:
+                            break
+                        dest_file.write(buffer[:bytes_read])
+                input_stream.close()
+                os.chmod(ffmpeg_bin_path, 0o755)
+                print("[Android FFmpeg] Successfully unpacked executable ffmpeg from assets.")
+            except Exception as e_asset:
+                print("[Android FFmpeg] Asset ffmpeg extraction skipped or not found:", e_asset)
+                
+        # 3. Dynamic PATH injection for the current running process
+        if private_bin not in os.environ["PATH"]:
+            os.environ["PATH"] = private_bin + os.pathsep + os.environ["PATH"]
+            
+        # 4. Setup writable temp directory environment variables for Android compatibility
+        cache_dir = context.getCacheDir().getAbsolutePath()
+        os.environ["TMPDIR"] = cache_dir
+        os.environ["TEMP"] = cache_dir
+        os.environ["TMP"] = cache_dir
+        print(f"[Android Env] Configured TMPDIR to writable app cache: {cache_dir}")
+    except Exception as ea:
+        print("[Android FFmpeg] Auto initialization error:", ea)
+
+    # To bypass Android 10+ SELinux execution blocks on native binaries (like ffmpeg)
+    # attempting to write to external/shared storage, we perform ALL downloads and merging
+    # inside the App's private sandboxed files directory, and then copy the merged product to public downloads.
+    DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "VeloceDownloads")
+    try:
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    except Exception as e:
-        print("Error initializing public downloads directory, falling back to private storage:", e)
-        DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "VeloceDownloads")
-        try:
-            os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-        except Exception as ex:
-            print("Failed to create fallback private downloads dir:", ex)
+        print(f"[Android Workspace] Set private workspace directory: {DOWNLOADS_DIR}")
+    except Exception as ex:
+        print("Failed to create private downloads dir:", ex)
             
     # Load task queue state and reset any active downloading/waiting tasks to paused on startup
     try:

@@ -75,6 +75,18 @@
                         <div class="card-details">
                             <h4 id="ffmpeg-title">正在检测 FFmpeg...</h4>
                             <p id="ffmpeg-desc">正在检查系统环境...</p>
+                            <!-- Action button and installation progress -->
+                            <div class="ffmpeg-install-actions" id="ffmpeg-install-actions">
+                                <button class="primary-btn sm hidden" id="btn-install-ffmpeg" style="margin-top: 10px; width: 100%; justify-content: center;">
+                                    <i data-lucide="download-cloud"></i> 一键自动下载并配置 FFmpeg (推荐)
+                                </button>
+                                <div class="install-progress-wrapper hidden" id="ffmpeg-install-progress-bar" style="margin-top: 10px;">
+                                    <div class="install-progress-track" style="height: 6px; background: rgba(255,255,255,0.08); border-radius: 99px; overflow: hidden; position: relative;">
+                                        <div class="install-progress-fill" id="ffmpeg-install-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--accent, #00f2fe), #4facfe); border-radius: 99px; transition: width 0.3s ease;"></div>
+                                    </div>
+                                    <span id="ffmpeg-install-text" style="font-size: 11px; color: var(--text-muted, #94a3b8); margin-top: 4px; display: block;">正在初始化...</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     

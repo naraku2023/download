@@ -106,17 +106,45 @@ async function fetchSettings() {
             downloadDirInput.value = data.settings.download_dir || '';
             concurrentInput.value = data.settings.max_concurrent || 3;
             
+            const btnInstallFfmpeg = document.getElementById('btn-install-ffmpeg');
+            const installProgressBar = document.getElementById('ffmpeg-install-progress-bar');
+            
             // Render FFmpeg Banner status
             if (data.settings.ffmpeg_installed) {
                 ffmpegBanner.className = 'ffmpeg-status-card active';
                 document.getElementById('ffmpeg-title').innerText = 'FFmpeg 已就绪';
                 document.getElementById('ffmpeg-desc').innerText = '系统已检测到 FFmpeg 编码器，支持合并下载 1080P/4K 高清视频流。';
                 document.getElementById('ffmpeg-icon').setAttribute('data-lucide', 'check-circle');
+                
+                if (btnInstallFfmpeg) btnInstallFfmpeg.classList.add('hidden');
+                if (installProgressBar) installProgressBar.classList.add('hidden');
             } else {
                 ffmpegBanner.className = 'ffmpeg-status-card missing';
                 document.getElementById('ffmpeg-title').innerText = '未检测到 FFmpeg';
                 document.getElementById('ffmpeg-desc').innerText = '未发现 FFmpeg。您仍能下载 720P 及以下整合视频；高清 1080P 下载可能会没有声音或失败。';
                 document.getElementById('ffmpeg-icon').setAttribute('data-lucide', 'alert-circle');
+                
+                // Show installation actions only on Windows (Chaquopy on Android handles FFmpeg release natively)
+                if (navigator.userAgent.indexOf('Windows') !== -1 || navigator.platform.indexOf('Win') !== -1 || window.AndroidBridge === undefined) {
+                    if (btnInstallFfmpeg) btnInstallFfmpeg.classList.remove('hidden');
+                } else {
+                    if (btnInstallFfmpeg) btnInstallFfmpeg.classList.add('hidden');
+                }
+            }
+            // Fetch and render physical diagnostics to settings description
+            try {
+                const diagResp = await fetch('/api/debug_ffmpeg');
+                const diagData = await diagResp.json();
+                if (diagData.success) {
+                    const descEl = document.getElementById('ffmpeg-desc');
+                    if (descEl) {
+                        const cleanDesc = descEl.innerHTML.split('诊断信息:')[0].trim();
+                        const diagText = `<br><span style="font-size:10px; color:rgba(255,255,255,0.45); font-family:monospace; display:block; margin-top:8px; line-height:1.3; word-break:break-all;">诊断信息: ${JSON.stringify(diagData.diagnostic)}</span>`;
+                        descEl.innerHTML = cleanDesc + diagText;
+                    }
+                }
+            } catch (diagErr) {
+                console.error('Failed to fetch diagnostics:', diagErr);
             }
             lucide.createIcons();
         }
@@ -720,6 +748,76 @@ urlInput.addEventListener('keypress', (e) => {
 // Analyze click binding
 btnAnalyze.addEventListener('click', analyzeLink);
 
+// Install FFmpeg Handler with Polling
+let ffmpegInstallInterval = null;
+
+async function startFFmpegInstallation() {
+    const btnInstallFfmpeg = document.getElementById('btn-install-ffmpeg');
+    const installProgressBar = document.getElementById('ffmpeg-install-progress-bar');
+    const installFill = document.getElementById('ffmpeg-install-fill');
+    const installText = document.getElementById('ffmpeg-install-text');
+    
+    if (btnInstallFfmpeg) btnInstallFfmpeg.classList.add('hidden');
+    if (installProgressBar) installProgressBar.classList.remove('hidden');
+    if (installFill) installFill.style.width = '0%';
+    if (installText) installText.innerText = '正在启动下载任务...';
+    
+    try {
+        const response = await fetch('/api/install_ffmpeg', { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('已启动 FFmpeg 自动部署，请勿关闭应用或断开网络', 'info');
+            
+            // Start polling progress
+            if (ffmpegInstallInterval) clearInterval(ffmpegInstallInterval);
+            ffmpegInstallInterval = setInterval(pollFFmpegInstallStatus, 800);
+        } else {
+            showToast(`启动自动部署失败: ${data.error}`, 'error');
+            if (btnInstallFfmpeg) btnInstallFfmpeg.classList.remove('hidden');
+            if (installProgressBar) installProgressBar.classList.add('hidden');
+        }
+    } catch (err) {
+        showToast('发起自动部署发生异常', 'error');
+        if (btnInstallFfmpeg) btnInstallFfmpeg.classList.remove('hidden');
+        if (installProgressBar) installProgressBar.classList.add('hidden');
+    }
+}
+
+async function pollFFmpegInstallStatus() {
+    const btnInstallFfmpeg = document.getElementById('btn-install-ffmpeg');
+    const installProgressBar = document.getElementById('ffmpeg-install-progress-bar');
+    const installFill = document.getElementById('ffmpeg-install-fill');
+    const installText = document.getElementById('ffmpeg-install-text');
+    
+    try {
+        const response = await fetch('/api/install_status');
+        const data = await response.json();
+        
+        if (data.success && data.state) {
+            const state = data.state;
+            
+            if (installFill) installFill.style.width = `${state.progress}%`;
+            if (installText) installText.innerText = state.message || '正在部署...';
+            
+            if (state.status === 'success') {
+                clearInterval(ffmpegInstallInterval);
+                ffmpegInstallInterval = null;
+                showToast('FFmpeg 便携包部署成功！已开启超高清合并与 HLS 切片转换支持。', 'success');
+                fetchSettings(); // Refresh settings UI to show "ready"
+            } else if (state.status === 'error') {
+                clearInterval(ffmpegInstallInterval);
+                ffmpegInstallInterval = null;
+                showToast(`部署出错: ${state.message}`, 'error');
+                if (btnInstallFfmpeg) btnInstallFfmpeg.classList.remove('hidden');
+                if (installProgressBar) installProgressBar.classList.add('hidden');
+            }
+        }
+    } catch (err) {
+        console.error('Error polling FFmpeg status:', err);
+    }
+}
+
 // Initialization on DOM content load
 document.addEventListener('DOMContentLoaded', () => {
     // Parse URL query parameters to split browser views dynamically
@@ -735,6 +833,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     } else {
         document.body.classList.add('view-home');
+    }
+
+    // Bind FFmpeg install trigger
+    const btnInstallFfmpeg = document.getElementById('btn-install-ffmpeg');
+    if (btnInstallFfmpeg) {
+        btnInstallFfmpeg.addEventListener('click', startFFmpegInstallation);
     }
 
     lucide.createIcons();
