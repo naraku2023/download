@@ -58,6 +58,8 @@ public class MainActivity extends AppCompatActivity {
     
     private final List<String> detectedVideoUrls = new ArrayList<>();
     private boolean adBlockEnabled = true;
+    private ImageButton btnAdblockSelect;
+    private boolean isAdBlockSelectMode = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,6 +86,7 @@ public class MainActivity extends AppCompatActivity {
         btnBack = findViewById(R.id.btn_back);
         btnRefresh = findViewById(R.id.btn_refresh);
         btnGo = findViewById(R.id.btn_go);
+        btnAdblockSelect = findViewById(R.id.btn_adblock_select);
         downloadFab = findViewById(R.id.download_fab);
         bottomNavigationView = findViewById(R.id.bottom_navigation);
         
@@ -130,6 +133,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         btnGo.setOnClickListener(v -> navigateToInputUrl());
+        btnAdblockSelect.setOnClickListener(v -> toggleAdBlockPickerMode());
 
         urlInput.setOnKeyListener((v, keyCode, event) -> {
             if (event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_ENTER) {
@@ -576,6 +580,36 @@ public class MainActivity extends AppCompatActivity {
                 adBlockEnabled = enabled;
             });
         }
+
+        @android.webkit.JavascriptInterface
+        public void requestElementBlock(final String hostname, final String selector, final String tagName) {
+            runOnUiThread(() -> {
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this)
+                    .setTitle("🛡️ 元素框选拦截")
+                    .setMessage("是否确认屏蔽并隐藏当前选择的网页元素？\n\n标签: " + tagName + "\n选择器: " + selector + "\n域名: " + hostname)
+                    .setPositiveButton("确认屏蔽", (dialog, which) -> {
+                        // 1. Hide element immediately in active WebView
+                        WebView active = getActiveWebView();
+                        if (active != null) {
+                            active.evaluateJavascript(
+                                "var el = document.querySelector('" + selector + "'); if (el) { el.style.display = 'none'; }",
+                                null
+                            );
+                        }
+                        // 2. Save rule permanently
+                        saveCustomBlockRule(hostname, selector);
+                        Toast.makeText(MainActivity.this, "已成功添加自定义拦截规则", Toast.LENGTH_SHORT).show();
+                        
+                        // 3. Deactivate selector picker mode
+                        deactivateAdBlockPickerMode();
+                    })
+                    .setNegativeButton("取消", (dialog, which) -> {
+                        deactivateAdBlockPickerMode();
+                    })
+                    .setOnCancelListener(dialog -> deactivateAdBlockPickerMode())
+                    .show();
+            });
+        }
     }
 
     // === Android Native Video Player Launcher ===
@@ -700,6 +734,25 @@ public class MainActivity extends AppCompatActivity {
                         "})();", 
                         null
                     );
+
+                    // Inject custom user-picked element blocking rules dynamically
+                    try {
+                        java.net.URL parsed = new java.net.URL(pageUrl);
+                        String host = parsed.getHost().toLowerCase();
+                        String customCSS = getCustomBlockRulesCSS(host);
+                        if (!customCSS.isEmpty()) {
+                            view.evaluateJavascript(
+                                "(function() {" +
+                                "  var style = document.createElement('style');" +
+                                "  style.innerHTML = `" + customCSS.replace("`", "\\`") + "`;" +
+                                "  if (document.head) { document.head.appendChild(style); }" +
+                                "})();",
+                                null
+                            );
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
                 }
 
                 if (view == getActiveWebView()) {
@@ -1031,6 +1084,179 @@ public class MainActivity extends AppCompatActivity {
         
         dialog.setContentView(root);
         dialog.show();
+    }
+
+    private void toggleAdBlockPickerMode() {
+        if (!isAdBlockSelectMode) {
+            activateAdBlockPickerMode();
+        } else {
+            deactivateAdBlockPickerMode();
+        }
+    }
+
+    private void activateAdBlockPickerMode() {
+        isAdBlockSelectMode = true;
+        runOnUiThread(() -> {
+            btnAdblockSelect.setImageTintList(android.content.res.ColorStateList.valueOf(0xFFFF3B30)); // Neon Red indicating selection active
+            Toast.makeText(this, "👉 元素选择模式已开启，请点击网页中的广告元素进行框选屏蔽", Toast.LENGTH_LONG).show();
+            
+            WebView active = getActiveWebView();
+            if (active != null) {
+                active.evaluateJavascript(
+                    "(function() {" +
+                    "  if (window.__adblock_picker_enabled) return;" +
+                    "  window.__adblock_picker_enabled = true;" +
+                    "  var style = document.createElement('style');" +
+                    "  style.id = '__adblock_picker_style';" +
+                    "  style.innerHTML = '.__adblock_hover { outline: 3px dashed #FF3B30 !important; background-color: rgba(255, 59, 48, 0.3) !important; cursor: pointer !important; transition: all 0.1s ease !important; }';" +
+                    "  if (document.head) { document.head.appendChild(style); }" +
+                    "  var currentEl = null;" +
+                    "  function onTouchMove(e) {" +
+                    "    var touch = e.touches[0];" +
+                    "    var el = document.elementFromPoint(touch.clientX, touch.clientY);" +
+                    "    if (el && el !== currentEl && el !== document.body && el !== document.documentElement) {" +
+                    "      if (currentEl) currentEl.classList.remove('__adblock_hover');" +
+                    "      currentEl = el;" +
+                    "      currentEl.classList.add('__adblock_hover');" +
+                    "    }" +
+                    "  }" +
+                    "  function onTouchEnd(e) {" +
+                    "    if (currentEl) {" +
+                    "      e.preventDefault();" +
+                    "      e.stopPropagation();" +
+                    "      currentEl.classList.remove('__adblock_hover');" +
+                    "      requestBlock(currentEl);" +
+                    "      currentEl = null;" +
+                    "    }" +
+                    "  }" +
+                    "  function onClick(e) {" +
+                    "    e.preventDefault();" +
+                    "    e.stopPropagation();" +
+                    "    requestBlock(e.target);" +
+                    "  }" +
+                    "  function getSelector(el) {" +
+                    "    if (!el) return '';" +
+                    "    if (el.id) return '#' + el.id;" +
+                    "    var selector = el.tagName.toLowerCase();" +
+                    "    if (el.className) {" +
+                    "      var classes = el.className.split(/\\s+/).filter(function(c) { return c && !c.startsWith('__adblock'); });" +
+                    "      if (classes.length > 0) {" +
+                    "        selector += '.' + classes.join('.');" +
+                    "      }" +
+                    "    }" +
+                    "    return selector;" +
+                    "  }" +
+                    "  function requestBlock(el) {" +
+                    "    var selector = getSelector(el);" +
+                    "    var tag = el.tagName.toLowerCase();" +
+                    "    if (window.AndroidBridge && window.AndroidBridge.requestElementBlock) {" +
+                    "      window.AndroidBridge.requestElementBlock(window.location.hostname, selector, tag);" +
+                    "    }" +
+                    "  }" +
+                    "  document.addEventListener('touchmove', onTouchMove, { passive: false });" +
+                    "  document.addEventListener('touchend', onTouchEnd, { passive: false });" +
+                    "  document.addEventListener('click', onClick, true);" +
+                    "  window.__adblock_disable_picker = function() {" +
+                    "    document.removeEventListener('touchmove', onTouchMove);" +
+                    "    document.removeEventListener('touchend', onTouchEnd);" +
+                    "    document.removeEventListener('click', onClick, true);" +
+                    "    var elStyle = document.getElementById('__adblock_picker_style');" +
+                    "    if (elStyle) elStyle.remove();" +
+                    "    window.__adblock_picker_enabled = false;" +
+                    "  };" +
+                    "})();",
+                    null
+                );
+            }
+        });
+    }
+
+    private void deactivateAdBlockPickerMode() {
+        isAdBlockSelectMode = false;
+        runOnUiThread(() -> {
+            btnAdblockSelect.setImageTintList(android.content.res.ColorStateList.valueOf(0xFFFFFFFF)); // Restore White color
+            WebView active = getActiveWebView();
+            if (active != null) {
+                active.evaluateJavascript("if (window.__adblock_disable_picker) { window.__adblock_disable_picker(); }", null);
+            }
+        });
+    }
+
+    private void saveCustomBlockRule(String hostname, String selector) {
+        try {
+            java.io.File file = new java.io.File(getFilesDir(), "custom_adblock_rules.json");
+            JSONObject json;
+            if (file.exists()) {
+                StringBuilder sb = new StringBuilder();
+                java.io.FileInputStream fis = new java.io.FileInputStream(file);
+                java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(fis, "UTF-8"));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+                reader.close();
+                fis.close();
+                json = new JSONObject(sb.toString());
+            } else {
+                json = new JSONObject();
+            }
+            
+            JSONArray rules;
+            if (json.has(hostname)) {
+                rules = json.getJSONArray(hostname);
+            } else {
+                rules = new JSONArray();
+            }
+            
+            boolean exists = false;
+            for (int i = 0; i < rules.length(); i++) {
+                if (rules.getString(i).equals(selector)) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                rules.put(selector);
+            }
+            
+            json.put(hostname, rules);
+            
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(file);
+            fos.write(json.toString().getBytes("UTF-8"));
+            fos.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private String getCustomBlockRulesCSS(String hostname) {
+        try {
+            java.io.File file = new java.io.File(getFilesDir(), "custom_adblock_rules.json");
+            if (!file.exists()) return "";
+            
+            StringBuilder sb = new StringBuilder();
+            java.io.FileInputStream fis = new java.io.FileInputStream(file);
+            java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(fis, "UTF-8"));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            reader.close();
+            fis.close();
+            
+            JSONObject json = new JSONObject(sb.toString());
+            if (json.has(hostname)) {
+                JSONArray rules = json.getJSONArray(hostname);
+                StringBuilder css = new StringBuilder();
+                for (int i = 0; i < rules.length(); i++) {
+                    css.append(rules.getString(i)).append(" { display: none !important; opacity: 0 !important; pointer-events: none !important; }\\n");
+                }
+                return css.toString();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return "";
     }
 
     // === Lightweight High-Performance AdBlocker Helper Class ===

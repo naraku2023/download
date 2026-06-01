@@ -66,6 +66,16 @@
                 android:contentDescription="Go"
                 android:tint="#FFFFFF"/>
 
+            <ImageButton
+                android:id="@+id/btn_adblock_select"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@android:drawable/ic_menu_crop"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Select element to block"
+                android:tint="#FFFFFF"
+                android:layout_marginStart="4dp"/>
+
             <FrameLayout
                 android:id="@+id/btn_tabs_container"
                 android:layout_width="40dp"
