@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# IDE / Editors
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Android / Gradle
+.gradle/
+local.properties
+**/build/
+Captures/
+.externalNativeBuild/
+.cxx/
+
+# Zip files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Downloads and multimedia
+downloads/
+*.mp4
+*.mkv
+*.avi
+*.mov
+
+# Local settings and runtime data
+history.json
+settings.json

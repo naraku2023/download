@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout 
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121212"
+    android:fitsSystemWindows="true">
+
+    <!-- 主容器，垂直排列顶部栏、内容区域和底部导航栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- 顶部地址与导航条 (只有在浏览器 Tab 选中时显示) -->
+        <LinearLayout
+            android:id="@+id/top_bar"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="8dp"
+            android:background="#1E1E1E">
+            
+            <ImageButton
+                android:id="@+id/btn_back"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@android:drawable/ic_media_previous"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Back"
+                android:tint="#FFFFFF"/>
+
+            <ImageButton
+                android:id="@+id/btn_refresh"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@android:drawable/ic_menu_rotate"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Refresh"
+                android:tint="#FFFFFF"
+                android:layout_marginEnd="4dp"/>
+
+            <EditText
+                android:id="@+id/url_input"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:hint="输入网址或视频链接..."
+                android:textColor="#FFFFFF"
+                android:textColorHint="#888888"
+                android:background="#2C2C2C"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:imeOptions="actionGo"
+                android:inputType="textUri"
+                android:singleLine="true"/>
+                
+            <ImageButton
+                android:id="@+id/btn_go"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@android:drawable/ic_media_play"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Go"
+                android:tint="#FFFFFF"/>
+
+            <FrameLayout
+                android:id="@+id/btn_tabs_container"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless">
+                
+                <ImageButton
+                    android:id="@+id/btn_tabs"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:src="@android:drawable/ic_menu_sort_by_size"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="Tabs"
+                    android:tint="#FFFFFF"
+                    android:layout_gravity="center"/>
+                
+                <TextView
+                    android:id="@+id/txt_tab_count"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="9sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:text="1"
+                    android:layout_gravity="top|end"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginEnd="2dp"/>
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- 内容叠加区 (通过显示/隐藏来实现网页探索与下载列表的秒级无感切换) -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <!-- 视图一：网页视频探测器容器 -->
+            <FrameLayout
+                android:id="@+id/browser_container"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <!-- 视图二：独立下载与进度管理器 -->
+            <WebView
+                android:id="@+id/downloads_webview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <!-- 视图三：独立系统设置管理器 -->
+            <WebView
+                android:id="@+id/settings_webview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <!-- 底部高质感导航栏 -->
+        <com.google.android.material.bottomnavigation.BottomNavigationView
+            android:id="@+id/bottom_navigation"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:background="#1E1E1E"
+            app:itemIconTint="@color/nav_item_color"
+            app:itemTextColor="@color/nav_item_color"
+            app:menu="@menu/bottom_nav_menu"
+            app:labelVisibilityMode="labeled"/>
+    </LinearLayout>
+
+    <!-- 悬浮视频检测按钮 (高亮唯美红/橘渐变，带有系统层级的悬浮表现) -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/download_fab"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="24dp"
+        android:layout_marginBottom="84dp"
+        android:src="@android:drawable/stat_sys_download_done"
+        app:backgroundTint="#FF3B30"
+        app:tint="#FFFFFF"
+        android:visibility="gone"
+        android:contentDescription="Download Detected Video"
+        app:elevation="8dp"/>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

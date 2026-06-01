@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout 
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#1E1E1E"
+    android:padding="20dp">
+
+    <!-- 滑动小条 Indicator -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:background="#555555"
+        android:layout_gravity="center"
+        android:layout_marginBottom="16dp"/>
+
+    <!-- 视频封面与标题区域 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="20dp">
+
+        <androidx.cardview.widget.CardView
+            android:layout_width="90dp"
+            android:layout_height="90dp"
+            app:cardCornerRadius="8dp"
+            app:cardBackgroundColor="#2C2C2C">
+            <ImageView
+                android:id="@+id/dialog_video_thumbnail"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:src="@android:drawable/ic_menu_gallery"
+                android:contentDescription="Video Thumbnail"/>
+        </androidx.cardview.widget.CardView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginStart="16dp">
+
+            <TextView
+                android:id="@+id/dialog_video_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="正在解析视频标题..."
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="2"
+                android:ellipsize="end"/>
+
+            <TextView
+                android:id="@+id/dialog_video_author"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="作者: 未知"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp"/>
+
+            <TextView
+                android:id="@+id/dialog_video_platform"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Generic"
+                android:textColor="#00E676"
+                android:textSize="10sp"
+                android:background="#2E7D32"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:layout_marginTop="6dp"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#333333"
+        android:layout_marginBottom="16dp"/>
+
+    <!-- 视频大小与格式信息 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+        
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="预估大小："
+            android:textColor="#CCCCCC"
+            android:textSize="14sp"/>
+
+        <TextView
+            android:id="@+id/dialog_video_size"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="计算中..."
+            android:textColor="#FF3B30"
+            android:textSize="14sp"
+            android:textStyle="bold"/>
+    </LinearLayout>
+
+    <!-- 一键极速下载按钮 -->
+    <Button
+        android:id="@+id/dialog_btn_confirm_download"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:text="🚀 一键极速下载"
+        android:textColor="#FFFFFF"
+        android:backgroundTint="#FF3B30"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:layout_marginTop="8dp"/>
+</LinearLayout>

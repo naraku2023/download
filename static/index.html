@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veloce - 极速网页视频下载器</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-theme">
+    <div class="background-grid"></div>
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="brand">
+                <div class="logo-icon">
+                    <i data-lucide="zap" class="pulse-icon"></i>
+                </div>
+                <div class="brand-text">
+                    <h1>Veloce</h1>
+                    <span>极速视频下载器</span>
+                </div>
+            </div>
+            
+            <div class="header-actions">
+                <div class="status-badge" id="server-status">
+                    <span class="status-dot online"></span>
+                    <span class="status-text">服务器已连接</span>
+                </div>
+                <button class="icon-btn btn-settings" id="btn-settings-toggle" title="设置">
+                    <i data-lucide="settings"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content Grid -->
+        <main class="main-content">
+            
+            <!-- Settings Drawer (Hidden by default) -->
+            <section class="settings-drawer hidden" id="settings-drawer">
+                <div class="drawer-header">
+                    <h2><i data-lucide="sliders-horizontal"></i> 系统配置</h2>
+                    <button class="close-btn" id="btn-settings-close"><i data-lucide="x"></i></button>
+                </div>
+                <div class="drawer-body">
+                    <div class="setting-item">
+                        <label for="download-dir-input">默认下载路径</label>
+                        <div class="input-group">
+                            <input type="text" id="download-dir-input" placeholder="D:\1111111\downloads">
+                            <button class="primary-btn" id="btn-open-dir" title="在资源管理器中打开">
+                                <i data-lucide="folder-open"></i> 打开
+                            </button>
+                        </div>
+                        <small class="help-text">视频下载完成后将保存在此本地目录中。</small>
+                    </div>
+
+                    <div class="setting-item">
+                        <label for="concurrent-input">并发下载限制</label>
+                        <input type="number" id="concurrent-input" min="1" max="10" value="3">
+                        <small class="help-text">同时进行的最大视频下载任务数。</small>
+                    </div>
+
+                    <div class="ffmpeg-status-card" id="ffmpeg-banner">
+                        <div class="card-icon info-icon">
+                            <i data-lucide="info" id="ffmpeg-icon"></i>
+                        </div>
+                        <div class="card-details">
+                            <h4 id="ffmpeg-title">正在检测 FFmpeg...</h4>
+                            <p id="ffmpeg-desc">正在检查系统环境...</p>
+                        </div>
+                    </div>
+                    
+                    <button class="save-settings-btn" id="btn-save-settings">
+                        <i data-lucide="save"></i> 保存设置
+                    </button>
+                </div>
+            </section>
+
+            <!-- Parser Panel -->
+            <section class="parser-section glass-card">
+                <div class="parser-wrapper">
+                    <div class="input-wrapper">
+                        <i data-lucide="link-2" class="input-link-icon"></i>
+                        <input type="text" id="url-input" placeholder="粘贴视频链接 (如 Bilibili, YouTube, 抖音, 微博 等)..." autocomplete="off">
+                        <button class="btn-paste" id="btn-paste" title="从剪贴板粘贴">
+                            <i data-lucide="clipboard"></i> 粘贴
+                        </button>
+                    </div>
+                    <button class="analyze-btn" id="btn-analyze">
+                        <span class="btn-text">解析链接</span>
+                        <i data-lucide="arrow-right" class="arrow-icon"></i>
+                        <div class="spinner hidden" id="analyze-spinner"></div>
+                    </button>
+                </div>
+
+                <!-- Quick Navigation Tiles (Only shown on Homepage) -->
+                <div class="quick-links">
+                    <a href="https://m.youtube.com" class="quick-link-tile youtube">
+                        <div class="tile-icon"><i data-lucide="youtube"></i></div>
+                        <span>YouTube</span>
+                    </a>
+                    <a href="https://m.bilibili.com" class="quick-link-tile bilibili">
+                        <div class="tile-icon">B</div>
+                        <span>B站</span>
+                    </a>
+                    <a href="https://m.tiktok.com" class="quick-link-tile tiktok">
+                        <div class="tile-icon"><i data-lucide="music"></i></div>
+                        <span>TikTok</span>
+                    </a>
+                    <a href="https://mobile.twitter.com" class="quick-link-tile twitter">
+                        <div class="tile-icon"><i data-lucide="twitter"></i></div>
+                        <span>Twitter</span>
+                    </a>
+                    <a href="https://rou.video" class="quick-link-tile rouvideo">
+                        <div class="tile-icon"><i data-lucide="video"></i></div>
+                        <span>RouVideo</span>
+                    </a>
+                    <a href="https://hsex.tv" class="quick-link-tile hsextv">
+                        <div class="tile-icon"><i data-lucide="tv"></i></div>
+                        <span>HSex.tv</span>
+                    </a>
+                </div>
+            </section>
+
+            <!-- Video Info Panel (Dynamic - Hidden until parsed) -->
+            <section class="video-info-section glass-card hidden" id="video-info-card">
+                <div class="video-info-grid">
+                    <!-- Column 1: Thumbnail -->
+                    <div class="video-thumbnail-wrapper">
+                        <img id="video-thumbnail" src="" alt="视频封面">
+                        <span class="video-duration" id="video-duration">00:00</span>
+                    </div>
+
+                    <!-- Column 2: Details & Format Selection -->
+                    <div class="video-meta-wrapper">
+                        <div class="video-title-container">
+                            <span class="platform-badge" id="video-platform">YouTube</span>
+                            <h2 id="video-title">正在载入视频标题...</h2>
+                            <p class="video-author">作者：<span id="video-author">-</span></p>
+                        </div>
+
+                        <div class="formats-container">
+                            <h3><i data-lucide="download-cloud"></i> 选择下载格式</h3>
+                            <div class="table-wrapper">
+                                <table class="formats-table">
+                                    <thead>
+                                        <tr>
+                                            <th>分辨率 / 音频</th>
+                                            <th>格式</th>
+                                            <th>预估大小</th>
+                                            <th>类型</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="formats-tbody">
+                                        <!-- Formats populated dynamically by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Downloading Progress List -->
+            <section class="progress-section hidden" id="progress-container">
+                <div class="section-title">
+                    <h3><i data-lucide="activity" class="pulse-icon blue"></i> 正在下载 (<span id="active-count">0</span>)</h3>
+                </div>
+                <div class="progress-list" id="progress-list">
+                    <!-- Progress items populated dynamically by JS -->
+                </div>
+            </section>
+
+            <!-- Completed Download History -->
+            <section class="history-section glass-card" id="history-container">
+                <div class="history-header">
+                    <h3><i data-lucide="history"></i> 下载历史记录</h3>
+                    <div class="history-actions">
+                        <button class="ghost-btn" id="btn-reveal-downloads">
+                            <i data-lucide="folder"></i> 打开下载目录
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Empty State -->
+                <div class="empty-state" id="history-empty">
+                    <i data-lucide="package-open"></i>
+                    <p>暂无下载历史，复制视频链接开始您的第一次下载吧！</p>
+                </div>
+
+                <div class="history-grid hidden" id="history-grid">
+                    <!-- Completed cards populated dynamically by JS -->
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Floating Toast Notification -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
