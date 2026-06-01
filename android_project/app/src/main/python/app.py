@@ -810,6 +810,17 @@ def proxy_image():
         
     try:
         import urllib.request
+        import ssl
+        from urllib.parse import urlparse
+        
+        # Deduce a valid Referer if none provided (very useful for bypassing anti-hotlink blocks)
+        if not referer:
+            try:
+                parsed_img = urlparse(url)
+                referer = f"{parsed_img.scheme}://{parsed_img.netloc}/"
+            except Exception:
+                pass
+
         headers = {
             'User-Agent': ua if ua else 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
@@ -819,7 +830,11 @@ def proxy_image():
             headers['Cookie'] = cookies
             
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as response:
+        
+        # Bypass SSL verification to avoid CERTIFICATE_VERIFY_FAILED error on devices with outdated CAs
+        ssl_context = ssl._create_unverified_context()
+        
+        with urllib.request.urlopen(req, timeout=10, context=ssl_context) as response:
             data = response.read()
             content_type = response.headers.get('Content-Type', 'image/jpeg')
             return data, 200, {'Content-Type': content_type}
