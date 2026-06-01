@@ -584,7 +584,7 @@ public class MainActivity extends AppCompatActivity {
         @android.webkit.JavascriptInterface
         public void requestElementBlock(final String hostname, final String selector, final String tagName) {
             runOnUiThread(() -> {
-                new com.google.android.material.dialog.MaterialAlertDialogBuilder(MainActivity.this)
+                new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
                     .setTitle("🛡️ 元素框选拦截")
                     .setMessage("是否确认屏蔽并隐藏当前选择的网页元素？\n\n标签: " + tagName + "\n选择器: " + selector + "\n域名: " + hostname)
                     .setPositiveButton("确认屏蔽", (dialog, which) -> {
