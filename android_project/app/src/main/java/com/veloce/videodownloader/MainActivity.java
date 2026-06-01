@@ -640,6 +640,10 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowUniversalAccessFromFileURLs(true);
         settings.setAllowFileAccessFromFileURLs(true);
         
+        // Block annoying JavaScript popups and force links to stay inside the active tab Webview
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        settings.setSupportMultipleWindows(false);
+        
         // Add JavaScript communication bridge
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
         
@@ -677,7 +681,13 @@ public class MainActivity extends AppCompatActivity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String reqUrl = request.getUrl().toString();
                 String lowerUrl = reqUrl.toLowerCase();
-                // Intercept actual index streams and full media assets, ignore ad trackers / html paths / HLS chunk fragments
+                
+                // 1. Intercept and block ad trackers/banner networks immediately
+                if (AdBlocker.isAd(reqUrl)) {
+                    return AdBlocker.createEmptyResource();
+                }
+                
+                // 2. Intercept actual index streams and full media assets, ignore ad trackers / html paths / HLS chunk fragments
                 if (lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8") || 
                     lowerUrl.contains(".flv") || lowerUrl.contains("ext=mp4") ||
                     lowerUrl.contains(".webm") || lowerUrl.contains(".mkv") ||
@@ -964,5 +974,54 @@ public class MainActivity extends AppCompatActivity {
         
         dialog.setContentView(root);
         dialog.show();
+    }
+
+    // === Lightweight High-Performance AdBlocker Helper Class ===
+    private static class AdBlocker {
+        private static final String[] AD_DOMAINS = {
+            "doubleclick.net", "google-analytics.com", "googleadservices.com", "googlesyndication.com",
+            "adservice.google.com", "popads.net", "popcash.net", "exoclick.com", "juicyads.com",
+            "adsterra.com", "adskeeper.co.uk", "onclickads.net", "ad-delivery", "adserver",
+            "scorecardresearch.com", "adnxs.com", "rubiconproject.com", "pubmatic.com",
+            "openx.net", "adtech.de", "advertising.com", "quantserve.com", "ampproject.org",
+            "adform.net", "outbrain.com", "taboola.com", "mgid.com", "criteo.com",
+            "amazon-adsystem.com", "assoc-amazon.com", "amazon-adsystem", "onclickpool.com",
+            "histats.com", "hicdn.online", "hotlinking", "clickadu", "adcash", "propellerads",
+            "adbox", "smartadserver", "adcolony", "applovin", "unityads", "ironsrc", "chartboost"
+        };
+
+        public static boolean isAd(String url) {
+            if (url == null) return false;
+            String lowerUrl = url.toLowerCase();
+            
+            // 1. Check known ad server domains
+            for (String domain : AD_DOMAINS) {
+                if (lowerUrl.contains(domain)) {
+                    return true;
+                }
+            }
+            
+            // 2. Check suspicious keywords in request path
+            if (lowerUrl.contains("/ads/") || lowerUrl.contains("?ad_") || 
+                lowerUrl.contains("&ad_") || lowerUrl.contains("/adv/") ||
+                lowerUrl.contains("ads.js") || lowerUrl.contains("analytics.js") ||
+                lowerUrl.contains("adbanner") || lowerUrl.contains("popupad") ||
+                lowerUrl.contains("/popunder") || lowerUrl.contains("click.php") ||
+                lowerUrl.contains("jump.php") || lowerUrl.contains("/adshow")) {
+                
+                // Allow our local app resources or video index stream detections
+                if (lowerUrl.contains("127.0.0.1") || lowerUrl.contains("localhost") || 
+                    lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8")) {
+                    return false;
+                }
+                return true;
+            }
+            
+            return false;
+        }
+
+        public static WebResourceResponse createEmptyResource() {
+            return new WebResourceResponse("text/plain", "UTF-8", new java.io.ByteArrayInputStream("".getBytes()));
+        }
     }
 }
