@@ -33,6 +33,13 @@ local_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bin')
 if os.path.isdir(local_bin):
     os.environ["PATH"] = local_bin + os.pathsep + os.environ["PATH"]
 
+import ssl
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
 
 # Configurations
 DOWNLOADS_DIR = os.path.join(os.getcwd(), 'downloads')
@@ -337,9 +344,14 @@ def execute_download(task_id, url, format_id, settings):
         'quiet': True,
         'no_warnings': True,
         'socket_timeout': 30,
-        'retries': 5,
+        'retries': 10,
         'fragment_retries': 10,
         'hls_prefer_native': True,  # Force native HLS downloader for robust HTTPS compatibility via Python urllib
+        'nocheckcertificate': True,
+        'legacyserverconnect': True,
+        'external_downloader_args': {
+            'ffmpeg': ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5']
+        }
     }
 
     # Special handling for direct_url (scraped streams like rou.video disguised as .jpg)
@@ -493,10 +505,121 @@ def serve_style_css():
 def serve_static(path):
     return send_from_directory('static', path)
 
+# Fallback generic scraper when yt-dlp fails (e.g., unsupported generic CMS sites like av.ad)
+def fallback_generic_parser(url, user_agent=None, cookies=None):
+    try:
+        import urllib.request
+        import re
+        import json
+        import urllib.parse
+
+        # Setup request with browser User-Agent & cookies
+        req_headers = {
+            'Referer': url
+        }
+        if user_agent:
+            req_headers['User-Agent'] = user_agent
+        else:
+            req_headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            
+        if cookies:
+            req_headers['Cookie'] = cookies
+            
+        req = urllib.request.Request(url, headers=req_headers)
+        
+        # Read page with 10s timeout
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html = response.read().decode('utf-8', errors='ignore')
+            
+        # 1. Try to extract Title
+        title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else "网页识别视频"
+        
+        # Clean title if it contains HTML or carriage returns
+        title = re.sub(r'\s+', ' ', title)
+        
+        # 2. Look for potential video URLs (m3u8, mp4, etc.)
+        video_urls = []
+        
+        # Note: We decode backslash escapes (e.g. \/ in JSON)
+        cleaned_html = html.replace('\\/', '/')
+        
+        # Look for patterns like "url": "...", "video": "...", url = "...", videoSrc = "..."
+        patterns = [
+            r'[\'"](https?://[^\'"]+\.m3u8[^\'"]*)[\'"]',
+            r'[\'"](https?://[^\'"]+\.mp4[^\'"]*)[\'"]',
+            r'[\'"](https?://[^\'"]+\.flv[^\'"]*)[\'"]',
+            r'[\'"](https?://[^\'"]+\.webm[^\'"]*)[\'"]'
+        ]
+        
+        for pat in patterns:
+            for match in re.findall(pat, cleaned_html, re.IGNORECASE):
+                # Unescape unicode sequences if present (like \u002f)
+                try:
+                    dec_url = bytes(match, "utf-8").decode("unicode_escape")
+                except Exception:
+                    dec_url = match
+                
+                # Check for common ad or track domains to exclude
+                if dec_url not in video_urls and not any(ad in dec_url.lower() for ad in ['doubleclick', 'googleads', 'analytics', 'stat', 'adsystem', 'adservice']):
+                    video_urls.append(dec_url)
+                    
+        # Also look for MacCMS player_data JSON format: "url":"https://..."
+        mac_cms_pat = r'"url"\s*:\s*"(https?://[^\'\"]+\.(?:m3u8|mp4)[^\'\"]*)"'
+        for match in re.findall(mac_cms_pat, cleaned_html, re.IGNORECASE):
+            try:
+                dec_url = bytes(match, "utf-8").decode("unicode_escape")
+            except Exception:
+                dec_url = match
+            if dec_url not in video_urls:
+                video_urls.append(dec_url)
+                
+        if not video_urls:
+            return None
+            
+        # Sort so m3u8 is preferred, then mp4
+        video_urls.sort(key=lambda u: ('.m3u8' in u.lower(), '.mp4' in u.lower()), reverse=True)
+        best_url = video_urls[0]
+        
+        # Build formats list
+        ext = "mp4" if ".mp4" in best_url.lower() else "m3u8"
+        label = "智能解析视频流 (M3U8/HLS)" if ext == "m3u8" else "智能解析视频 (MP4)"
+        
+        formats = [{
+            "format_id": "fallback_generic",
+            "ext": ext,
+            "resolution": "HD",
+            "label": label,
+            "size": "未知 (动态解析)",
+            "filesize": 0,
+            "has_video": True,
+            "has_audio": True,
+            "fps": "",
+            "direct_url": best_url
+        }]
+        
+        metadata = {
+            "title": title,
+            "duration": "Unknown",
+            "thumbnail": "",
+            "author": "智能网页提取器",
+            "platform": "SmartFallback",
+            "formats": formats,
+            "url": url,
+            "scraped": True
+        }
+        return metadata
+    except Exception as e:
+        print("Error in fallback generic parser:", e)
+        return None
+
 @app.route('/api/analyze', methods=['POST'])
 def analyze_link():
     data = request.json
     url = data.get('url')
+    user_agent = data.get('user_agent')
+    cookies = data.get('cookies')
+    
     if not url:
         return jsonify({"success": False, "error": "URL is required"}), 400
     
@@ -515,7 +638,20 @@ def analyze_link():
             'skip_download': True,
             'quiet': True,
             'no_warnings': True,
+            'nocheckcertificate': True,
+            'legacyserverconnect': True,
         }
+        
+        # Inject custom user_agent & cookies headers from WebView context to bypass blocklists/anti-bot checks
+        headers = {
+            'Referer': url
+        }
+        if user_agent:
+            headers['User-Agent'] = user_agent
+        if cookies:
+            headers['Cookie'] = cookies
+            
+        ydl_opts['http_headers'] = headers
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -588,6 +724,34 @@ def analyze_link():
         
         return jsonify({"success": True, "metadata": metadata})
         
+    except Exception as e:
+        original_error = str(e)
+        print("yt-dlp failed, trying fallback generic scraper:", original_error)
+        try:
+            fallback_meta = fallback_generic_parser(url, user_agent=user_agent, cookies=cookies)
+            if fallback_meta:
+                return jsonify({"success": True, "metadata": fallback_meta})
+        except Exception as fe:
+            print("Fallback generic scraper failed:", fe)
+        
+        # If fallback also failed, return original error
+        return jsonify({"success": False, "error": original_error}), 500
+
+@app.route('/api/fetch_script', methods=['GET'])
+def fetch_script_endpoint():
+    url = request.args.get('url')
+    if not url:
+        return jsonify({"success": False, "error": "URL is required"}), 400
+        
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            url, 
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            code = response.read().decode('utf-8', errors='ignore')
+        return jsonify({"success": True, "code": code})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

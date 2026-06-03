@@ -1,3 +1,23 @@
+// Safely wrap Lucide icons function to prevent crashes if offline or CDN fails
+(function() {
+    if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        const originalCreateIcons = lucide.createIcons;
+        lucide.createIcons = function() {
+            try {
+                return originalCreateIcons.apply(this, arguments);
+            } catch (e) {
+                console.error('Failed to create Lucide icons:', e);
+            }
+        };
+    } else {
+        window.lucide = {
+            createIcons: function() {
+                console.warn('Lucide CDN is offline. Fallback no-op icon creation.');
+            }
+        };
+    }
+})();
+
 // Override fetch to support absolute path under local file protocol (Android WebView assets)
 if (window.location.protocol === 'file:') {
     const originalFetch = window.fetch;
@@ -112,6 +132,16 @@ async function fetchSettings() {
             }
             if (popupBlockInput) {
                 popupBlockInput.checked = data.settings.popup_block_enabled !== false;
+            }
+
+            // Load and display Search Engine setting
+            const searchEngineInput = document.getElementById('search-engine-input');
+            if (searchEngineInput) {
+                if (window.AndroidBridge && window.AndroidBridge.getSearchEngine) {
+                    searchEngineInput.value = window.AndroidBridge.getSearchEngine();
+                } else {
+                    searchEngineInput.value = localStorage.getItem('search_engine') || 'bing';
+                }
             }
             
             // Sync with Android native bridge if available on startup
@@ -351,6 +381,27 @@ async function deleteHistory(btn, id, title) {
     }
 }
 
+// Clean up obscure Python/yt-dlp raw error traces into user-friendly Chinese tips
+function cleanErrorMessage(rawError) {
+    if (!rawError) return '未知网络错误';
+    if (rawError.includes('Piracy') || rawError.includes('piracy')) {
+        return '该网站因版权或限制暂不支持解析。请直接在内置浏览器中播放视频，右下角会自动弹出黄色下载按钮，点击即可直接下载。';
+    }
+    if (rawError.includes('403') || rawError.includes('Forbidden')) {
+        return '目标网站拒绝了连接请求 (403 访问受限)。请在内置浏览器中打开并播放视频以进行底层嗅探下载。';
+    }
+    if (rawError.includes('410') || rawError.includes('Gone')) {
+        return '解析地址已失效 (410 资源已过期)。请在内置浏览器中刷新页面并重新播放以捕获有效下载直链。';
+    }
+    if (rawError.includes('404') || rawError.includes('Not Found')) {
+        return '网页或视频资源未找到 (404 错误)。请在内置浏览器中打开视频页面尝试播放嗅探。';
+    }
+    if (rawError.includes('Unsupported URL') || rawError.includes('extractor')) {
+        return '该网站暂不支持一键解析。请直接在内置浏览器中打开并播放视频，右下角会自动弹出黄色下载按钮。';
+    }
+    return rawError;
+}
+
 // Analyze link
 async function analyzeLink() {
     const url = urlInput.value.trim();
@@ -375,7 +426,10 @@ async function analyzeLink() {
         const response = await fetch('/api/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
+            body: JSON.stringify({ 
+                url,
+                user_agent: navigator.userAgent
+            })
         });
         const data = await response.json();
         
@@ -384,7 +438,8 @@ async function analyzeLink() {
             renderVideoDetails(data.metadata);
             showToast('解析成功！', 'success');
         } else {
-            showToast(`解析失败: ${data.error || '未知网络错误'}`, 'error');
+            const cleanErr = cleanErrorMessage(data.error);
+            showToast(`解析失败: ${cleanErr}`, 'error');
         }
     } catch (err) {
         showToast('解析请求失败，请检查网络连接及后台状态', 'error');
@@ -1015,6 +1070,45 @@ async function pollProgress() {
     }
 }
 
+async function saveSettings() {
+    if (btnSaveSettings) {
+        btnSaveSettings.disabled = true;
+        btnSaveSettings.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite;"></span> 正在保存...';
+    }
+
+    const newDir = downloadDirInput ? downloadDirInput.value.trim() : '';
+    const newConcurrent = concurrentInput ? parseInt(concurrentInput.value, 10) : 3;
+    const adBlockEnabled = adBlockInput ? adBlockInput.checked : true;
+    const popupBlockEnabled = popupBlockInput ? popupBlockInput.checked : true;
+    
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                download_dir: newDir,
+                max_concurrent: newConcurrent,
+                adblock_enabled: adBlockEnabled,
+                popup_block_enabled: popupBlockEnabled
+            })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showToast('设置已保存并生效', 'success');
+        } else {
+            showToast(`设置保存失败: ${data.error}`, 'error');
+        }
+    } catch (err) {
+        showToast('保存设置请求异常', 'error');
+    } finally {
+        if (btnSaveSettings) {
+            btnSaveSettings.disabled = false;
+            btnSaveSettings.innerHTML = '<i data-lucide="save"></i> 保存设置';
+            lucide.createIcons();
+        }
+    }
+}
+
 // Settings toggle events
 btnSettingsToggle.addEventListener('click', () => {
     settingsDrawer.classList.toggle('hidden');
@@ -1023,19 +1117,26 @@ btnSettingsToggle.addEventListener('click', () => {
     }
 });
 
-btnSettingsClose.addEventListener('click', () => {
-    settingsDrawer.classList.add('hidden');
-});
+if (btnSettingsClose) {
+    btnSettingsClose.addEventListener('click', () => {
+        settingsDrawer.classList.add('hidden');
+    });
+}
 
-// Save settings configuration
-btnSaveSettings.addEventListener('click', async () => {
+if (btnSaveSettings) {
+    btnSaveSettings.addEventListener('click', saveSettings);
+}
+
+// Auto-Save settings configuration
+async function autoSaveSettings() {
     const downloadDir = downloadDirInput.value.trim();
     const maxConcurrent = parseInt(concurrentInput.value) || 3;
     const adblockEnabled = adBlockInput ? adBlockInput.checked : true;
     const popupBlockEnabled = popupBlockInput ? popupBlockInput.checked : true;
+    const searchEngineInput = document.getElementById('search-engine-input');
+    const searchEngine = searchEngineInput ? searchEngineInput.value : 'bing';
     
     if (!downloadDir) {
-        showToast('下载文件夹路径不能为空', 'warning');
         return;
     }
     
@@ -1053,7 +1154,6 @@ btnSaveSettings.addEventListener('click', async () => {
         const data = await response.json();
         
         if (data.success) {
-            showToast('系统配置保存成功！', 'success');
             if (window.AndroidBridge) {
                 if (window.AndroidBridge.setAdBlockEnabled) {
                     window.AndroidBridge.setAdBlockEnabled(adblockEnabled);
@@ -1061,15 +1161,17 @@ btnSaveSettings.addEventListener('click', async () => {
                 if (window.AndroidBridge.setPopupBlockEnabled) {
                     window.AndroidBridge.setPopupBlockEnabled(popupBlockEnabled);
                 }
+                if (window.AndroidBridge.setSearchEngine) {
+                    window.AndroidBridge.setSearchEngine(searchEngine);
+                }
+            } else {
+                localStorage.setItem('search_engine', searchEngine);
             }
-            settingsDrawer.classList.add('hidden');
-        } else {
-            showToast(`保存失败: ${data.error}`, 'error');
         }
     } catch (err) {
-        showToast('保存设置连接异常', 'error');
+        console.error('Error saving settings automatically:', err);
     }
-});
+}
 
 // Open downloads directory
 btnOpenDir.addEventListener('click', async () => {
@@ -1243,6 +1345,14 @@ document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
     fetchSettings();
     loadHistory();
+
+    // Bind Auto-Save settings listeners
+    downloadDirInput.addEventListener('input', autoSaveSettings);
+    concurrentInput.addEventListener('change', autoSaveSettings);
+    if (adBlockInput) adBlockInput.addEventListener('change', autoSaveSettings);
+    if (popupBlockInput) popupBlockInput.addEventListener('change', autoSaveSettings);
+    const searchEngineInput = document.getElementById('search-engine-input');
+    if (searchEngineInput) searchEngineInput.addEventListener('change', autoSaveSettings);
     
     // Bind script events
     const btnImportScript = document.getElementById('btn-import-script');
@@ -1304,6 +1414,158 @@ document.addEventListener('DOMContentLoaded', () => {
     // Silent automatic updates check for scripts linked via URL
     updateUserScripts(false);
     
+    // Load custom shortcuts
+    renderCustomShortcuts();
+
+    // Bind Shortcut Modal buttons
+    const btnShortcutCancel = document.getElementById('btn-shortcut-cancel');
+    const btnShortcutSave = document.getElementById('btn-shortcut-save');
+    if (btnShortcutCancel) {
+        btnShortcutCancel.addEventListener('click', () => showShortcutModal(false));
+    }
+    if (btnShortcutSave) {
+        btnShortcutSave.addEventListener('click', saveNewShortcut);
+    }
+    
     // Check if there are any active downloads running in the background upon startup
     startProgressPolling();
 });
+
+// Custom shortcuts management
+function loadCustomShortcuts() {
+    try {
+        return JSON.parse(localStorage.getItem('custom_shortcuts') || '[]');
+    } catch (e) {
+        console.error('Error loading custom shortcuts:', e);
+        return [];
+    }
+}
+
+function saveCustomShortcuts(shortcuts) {
+    try {
+        localStorage.setItem('custom_shortcuts', JSON.stringify(shortcuts));
+    } catch (e) {
+        console.error('Error saving custom shortcuts:', e);
+    }
+}
+
+function renderCustomShortcuts() {
+    const container = document.getElementById('quick-links-container');
+    if (!container) return;
+
+    const shortcuts = loadCustomShortcuts();
+    container.innerHTML = '';
+
+    shortcuts.forEach(item => {
+        const tile = document.createElement('div');
+        tile.className = 'quick-link-tile';
+        tile.style.position = 'relative';
+        
+        // Determine first letter for fallback icon
+        const initial = item.title ? item.title.substring(0, 1).toUpperCase() : '?';
+        
+        tile.innerHTML = `
+            <a href="${item.url}" style="display: flex; flex-direction: column; align-items: center; width: 100%; height: 100%; text-decoration: none;">
+                <div class="tile-icon" style="background: rgba(255,255,255,0.03); color: #fff; font-weight: bold; font-size: 16px; border: 1px solid rgba(255,255,255,0.08); font-family: 'Outfit', sans-serif;">
+                    ${initial}
+                </div>
+                <span style="font-size: 12px; margin-top: 8px; color: rgba(255,255,255,0.7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80px;">${item.title}</span>
+            </a>
+            <button class="delete-shortcut-btn" data-id="${item.id}" style="position: absolute; top: 0px; right: 0px; background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.1); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; color: #ff3b30; cursor: pointer; padding: 0; outline: none; z-index: 10;" title="删除快捷链接">
+                <i data-lucide="x" style="width: 10px; height: 10px;"></i>
+            </button>
+        `;
+        
+        // Add click listener to anchor to navigate safely via AndroidBridge
+        const link = tile.querySelector('a');
+        if (link) {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                openSourceUrl(item.url);
+            });
+        }
+        
+        // Add delete button event listener
+        const delBtn = tile.querySelector('.delete-shortcut-btn');
+        delBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            deleteCustomShortcut(item.id);
+        });
+
+        container.appendChild(tile);
+    });
+
+    // Add "+ Add Shortcut" tile
+    const addTile = document.createElement('div');
+    addTile.className = 'quick-link-tile add-shortcut-tile';
+    addTile.style.cursor = 'pointer';
+    addTile.innerHTML = `
+        <div class="tile-icon" style="background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.15); color: rgba(255,255,255,0.5); display: flex; align-items: center; justify-content: center;">
+            <i data-lucide="plus"></i>
+        </div>
+        <span style="font-size: 12px; margin-top: 8px; color: rgba(255,255,255,0.5);">添加网站</span>
+    `;
+    addTile.addEventListener('click', () => {
+        showShortcutModal(true);
+    });
+
+    container.appendChild(addTile);
+    lucide.createIcons();
+}
+
+function deleteCustomShortcut(id) {
+    let shortcuts = loadCustomShortcuts();
+    shortcuts = shortcuts.filter(s => s.id !== id);
+    saveCustomShortcuts(shortcuts);
+    renderCustomShortcuts();
+    showToast('快捷链接已删除', 'info');
+}
+
+function showShortcutModal(show) {
+    const modal = document.getElementById('shortcut-modal');
+    if (!modal) return;
+    if (show) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        document.getElementById('shortcut-title-input').value = '';
+        document.getElementById('shortcut-url-input').value = '';
+    } else {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+    }
+}
+
+function saveNewShortcut() {
+    const titleInput = document.getElementById('shortcut-title-input');
+    const urlInput = document.getElementById('shortcut-url-input');
+    if (!titleInput || !urlInput) return;
+
+    const title = titleInput.value.trim();
+    let url = urlInput.value.trim();
+
+    if (!title) {
+        showToast('网站名称不能为空', 'warning');
+        return;
+    }
+    if (!url) {
+        showToast('网站网址不能为空', 'warning');
+        return;
+    }
+
+    // Auto prepend http:// or https:// if missing
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+    }
+
+    const shortcuts = loadCustomShortcuts();
+    shortcuts.push({
+        id: 'shortcut_' + Date.now(),
+        title: title,
+        url: url
+    });
+    saveCustomShortcuts(shortcuts);
+    showShortcutModal(false);
+    renderCustomShortcuts();
+    showToast('快捷链接添加成功', 'success');
+}

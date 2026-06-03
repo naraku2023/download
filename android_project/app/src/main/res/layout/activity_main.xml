@@ -42,22 +42,41 @@
                 android:tint="#FFFFFF"
                 android:layout_marginEnd="4dp"/>
 
-            <EditText
-                android:id="@+id/url_input"
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="40dp"
                 android:layout_weight="1"
-                android:hint="输入网址或视频链接..."
-                android:textColor="#FFFFFF"
-                android:textColorHint="#888888"
                 android:background="@drawable/bg_search_bar"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:drawableStart="@drawable/ic_search"
-                android:drawablePadding="8dp"
-                android:imeOptions="actionGo"
-                android:inputType="textUri"
-                android:singleLine="true"/>
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp">
+
+                <ImageView
+                    android:id="@+id/btn_search_engine"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_search"
+                    android:tint="#FFFFFF"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:contentDescription="Select Search Engine"/>
+
+                <EditText
+                    android:id="@+id/url_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:hint="输入网址或视频链接..."
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#888888"
+                    android:background="@android:color/transparent"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:imeOptions="actionGo"
+                    android:inputType="textUri"
+                    android:singleLine="true"/>
+            </LinearLayout>
                 
             <ImageButton
                 android:id="@+id/btn_go"

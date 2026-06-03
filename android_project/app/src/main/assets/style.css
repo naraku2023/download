@@ -584,6 +584,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+    min-width: 0;
+    width: 100%;
 }
 
 .video-title-container {
@@ -610,6 +612,8 @@ body {
     font-size: 1.25rem;
     font-weight: 700;
     line-height: 1.3;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .video-author {
@@ -621,6 +625,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    min-width: 0;
+    width: 100%;
 }
 
 .formats-container h3 {
@@ -636,10 +642,11 @@ body {
 .table-wrapper {
     border: 1px solid var(--border-color);
     border-radius: 12px;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: auto;
     background: rgba(0, 0, 0, 0.2);
     max-height: 300px;
-    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .formats-table {
@@ -1141,6 +1148,11 @@ body {
     transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.toast span {
+    word-break: break-all;
+    white-space: normal;
+}
+
 .toast.show {
     transform: translateX(0);
 }
@@ -1154,6 +1166,8 @@ body {
 @media (max-width: 868px) {
     .video-info-grid {
         grid-template-columns: 1fr;
+        min-width: 0;
+        width: 100%;
     }
     
     .video-thumbnail-wrapper {
@@ -1168,6 +1182,34 @@ body {
     .analyze-btn {
         padding: 1rem;
         justify-content: center;
+    }
+}
+
+@media (max-width: 480px) {
+    .glass-card {
+        padding: 1rem;
+        border-radius: 12px;
+    }
+    .formats-table th,
+    .formats-table td {
+        padding: 0.5rem 0.35rem;
+        font-size: 0.7rem;
+    }
+    .formats-table td .type-badge {
+        padding: 0.1rem 0.25rem;
+        font-size: 0.65rem;
+    }
+    .formats-table td .dl-btn {
+        padding: 0.25rem 0.45rem;
+        font-size: 0.65rem;
+        gap: 0.2rem;
+    }
+    .formats-table td .dl-btn i {
+        width: 10px !important;
+        height: 10px !important;
+    }
+    .app-container {
+        padding: 1rem 0.75rem;
     }
 }
 
@@ -1357,5 +1399,33 @@ body.view-home #settings-drawer {
     .card-action-btn {
         padding: 0.3rem !important;
         font-size: 0.7rem !important;
+    }
+
+    /* 4. Responsive Toast overrides to prevent screen overflow */
+    .toast-container {
+        left: 1rem;
+        right: 1rem;
+        bottom: 1.5rem;
+        width: auto;
+        align-items: stretch;
+    }
+    .toast {
+        max-width: 100%;
+        word-break: break-all;
+        white-space: normal;
+        display: flex;
+        align-items: flex-start;
+        transform: translateY(100px);
+        opacity: 0;
+        transition: all 0.3s ease;
+    }
+    .toast.show {
+        transform: translateY(0);
+        opacity: 1;
+    }
+    .toast span {
+        word-break: break-all;
+        white-space: normal;
+        flex: 1;
     }
 }

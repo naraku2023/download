@@ -16,6 +16,7 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
@@ -51,6 +52,8 @@ public class MainActivity extends AppCompatActivity {
     private ImageButton btnGo;
     private FloatingActionButton downloadFab;
     private BottomNavigationView bottomNavigationView;
+    private ImageView btnSearchEngine;
+    private String currentSearchEngine = "bing";
     
     private android.widget.FrameLayout btnTabs;
     private TextView txtTabCount;
@@ -91,6 +94,12 @@ public class MainActivity extends AppCompatActivity {
         
         btnTabs = findViewById(R.id.btn_tabs);
         txtTabCount = findViewById(R.id.txt_tab_count);
+
+        btnSearchEngine = findViewById(R.id.btn_search_engine);
+        currentSearchEngine = getSharedPreferences("veloce_browser", MODE_PRIVATE)
+            .getString("search_engine", "bing");
+        updateSearchEngineUI();
+        btnSearchEngine.setOnClickListener(v -> showSearchEngineMenu());
 
         // 2. Start Python Flask server
         if (!Python.isStarted()) {
@@ -275,7 +284,26 @@ public class MainActivity extends AppCompatActivity {
             if (input.contains(".") && !input.contains(" ")) {
                 input = "https://" + input;
             } else {
-                input = "https://www.google.com/search?q=" + android.net.Uri.encode(input);
+                String searchUrl;
+                switch (currentSearchEngine) {
+                    case "yandex":
+                        searchUrl = "https://yandex.com/search/?text=";
+                        break;
+                    case "baidu":
+                        searchUrl = "https://www.baidu.com/s?wd=";
+                        break;
+                    case "bing":
+                        searchUrl = "https://cn.bing.com/search?q=";
+                        break;
+                    case "duckduckgo":
+                        searchUrl = "https://duckduckgo.com/?q=";
+                        break;
+                    case "google":
+                    default:
+                        searchUrl = "https://www.google.com/search?q=";
+                        break;
+                }
+                input = searchUrl + android.net.Uri.encode(input);
             }
         }
         
@@ -590,6 +618,23 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @android.webkit.JavascriptInterface
+        public String getSearchEngine() {
+            return currentSearchEngine;
+        }
+
+        @android.webkit.JavascriptInterface
+        public void setSearchEngine(String engine) {
+            runOnUiThread(() -> {
+                currentSearchEngine = engine;
+                getSharedPreferences("veloce_browser", MODE_PRIVATE)
+                    .edit()
+                    .putString("search_engine", engine)
+                    .apply();
+                updateSearchEngineUI();
+            });
+        }
+
+        @android.webkit.JavascriptInterface
         public String getClipboardText() {
             final String[] result = new String[]{""};
             final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
@@ -725,6 +770,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                     detectedVideoUrls.clear();
                     updateFabStatus(false);
+                    updateSearchEngineUI();
                 }
             }
 
@@ -768,6 +814,7 @@ public class MainActivity extends AppCompatActivity {
                             updateFabStatus(true);
                         }
                     }
+                    updateSearchEngineUI();
                 }
                 
                 // Inject custom userscripts if this is a remote page
@@ -779,11 +826,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
-                    String url = request.getUrl().toString();
-                    if (adBlockEnabled && AdBlocker.isAd(url)) {
-                        android.util.Log.d("AdBlocker", "Blocked shouldOverrideUrlLoading: " + url);
-                        return true;
-                    }
+                    return handleCustomScheme(view, request.getUrl().toString());
                 }
                 return false;
             }
@@ -791,9 +834,38 @@ public class MainActivity extends AppCompatActivity {
             @SuppressWarnings("deprecation")
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.N) {
+                    return handleCustomScheme(view, url);
+                }
+                return false;
+            }
+            
+            private boolean handleCustomScheme(WebView view, String url) {
+                if (url == null) return false;
                 if (adBlockEnabled && AdBlocker.isAd(url)) {
-                    android.util.Log.d("AdBlocker", "Blocked shouldOverrideUrlLoading (Deprecated): " + url);
                     return true;
+                }
+                
+                if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("file://")) {
+                    try {
+                        android.content.Intent intent;
+                        if (url.startsWith("intent://")) {
+                            intent = android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME);
+                            intent.addCategory(android.content.Intent.CATEGORY_BROWSABLE);
+                            intent.setComponent(null);
+                            intent.setSelector(null);
+                        } else {
+                            intent = new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url));
+                        }
+                        
+                        // Check if there is an app to handle it
+                        if (getPackageManager().resolveActivity(intent, 0) != null) {
+                            startActivity(intent);
+                        }
+                    } catch (Exception e) {
+                        android.util.Log.e("WebView", "Custom scheme redirect failed: " + url, e);
+                    }
+                    return true; // Always return true for custom schemes to prevent ERR_UNKNOWN_URL_SCHEME
                 }
                 return false;
             }
@@ -815,10 +887,14 @@ public class MainActivity extends AppCompatActivity {
                     lowerUrl.contains(".mov") || lowerUrl.contains(".mp3") ||
                     lowerUrl.contains(".m4a")) {
                     if (!detectedVideoUrls.contains(reqUrl)) {
+                        boolean wasEmpty = detectedVideoUrls.isEmpty();
                         detectedVideoUrls.add(reqUrl);
                         runOnUiThread(() -> {
                             if (view == getActiveWebView()) {
                                 updateFabStatus(true);
+                                if (wasEmpty) {
+                                    Toast.makeText(MainActivity.this, "⚡ 已成功捕获视频流，点击右下角下载！", Toast.LENGTH_SHORT).show();
+                                }
                             }
                         });
                     }
@@ -872,6 +948,7 @@ public class MainActivity extends AppCompatActivity {
         }
         
         updateTabCountBadge();
+        updateSearchEngineUI();
         saveSessionState();
     }
 
@@ -1168,6 +1245,74 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private void updateSearchEngineUI() {
+        if (urlInput == null) return;
+        
+        WebView active = getActiveWebView();
+        if (active != null && active.getUrl() != null && active.getUrl().startsWith("file:///android_asset")) {
+            urlInput.setHint("");
+            return;
+        }
+
+        switch (currentSearchEngine) {
+            case "yandex":
+                urlInput.setHint("Yandex 搜索或输入网址...");
+                break;
+            case "baidu":
+                urlInput.setHint("百度搜索或输入网址...");
+                break;
+            case "bing":
+                urlInput.setHint("必应搜索或输入网址...");
+                break;
+            case "duckduckgo":
+                urlInput.setHint("DuckDuckGo 搜索或输入网址...");
+                break;
+            case "google":
+            default:
+                urlInput.setHint("谷歌搜索或输入网址...");
+                break;
+        }
+    }
+
+    private void showSearchEngineMenu() {
+        PopupMenu popup = new PopupMenu(this, btnSearchEngine);
+        popup.getMenu().add(0, 1, 0, "必应搜索 (Bing)");
+        popup.getMenu().add(0, 2, 0, "谷歌搜索 (Google)");
+        popup.getMenu().add(0, 3, 0, "百度搜索 (Baidu)");
+        popup.getMenu().add(0, 4, 0, "Yandex 搜索");
+        popup.getMenu().add(0, 5, 0, "DuckDuckGo 搜索");
+
+        popup.setOnMenuItemClickListener(item -> {
+            String selected = "bing";
+            switch (item.getItemId()) {
+                case 1:
+                    selected = "bing";
+                    break;
+                case 2:
+                    selected = "google";
+                    break;
+                case 3:
+                    selected = "baidu";
+                    break;
+                case 4:
+                    selected = "yandex";
+                    break;
+                case 5:
+                    selected = "duckduckgo";
+                    break;
+            }
+            currentSearchEngine = selected;
+            getSharedPreferences("veloce_browser", MODE_PRIVATE)
+                .edit()
+                .putString("search_engine", selected)
+                .apply();
+            updateSearchEngineUI();
+            Toast.makeText(this, "搜索引擎已切换为: " + item.getTitle(), Toast.LENGTH_SHORT).show();
+            return true;
+        });
+        popup.show();
     }
 
     // === Lightweight High-Performance AdBlocker Helper Class ===
