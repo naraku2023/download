@@ -572,10 +572,18 @@ async function resumeTask(taskId) {
 }
 
 // Poll Active Download progress with smooth diffing
+let idleInterval = null;
+
+// Poll Active Download progress with smooth diffing
 function startProgressPolling() {
+    if (idleInterval) {
+        clearInterval(idleInterval);
+        idleInterval = null;
+    }
+    if (isPolling) return;
     isPolling = true;
     pollProgress();
-    pollingInterval = setInterval(pollProgress, 900);
+    pollingInterval = setInterval(pollProgress, 1200);
 }
 
 function stopProgressPolling() {
@@ -584,6 +592,271 @@ function stopProgressPolling() {
         clearInterval(pollingInterval);
         pollingInterval = null;
     }
+    startIdlePolling();
+}
+
+function startIdlePolling() {
+    if (idleInterval) return;
+    idleInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/progress');
+            const data = await response.json();
+            if (data.success && data.tasks) {
+                const hasActive = data.tasks.some(t => t.status === 'downloading' || t.status === 'paused');
+                if (hasActive) {
+                    clearInterval(idleInterval);
+                    idleInterval = null;
+                    startProgressPolling();
+                }
+            }
+        } catch (err) {
+            console.error('Error during idle polling:', err);
+        }
+    }, 4000);
+}
+
+// Userscript management helper functions
+function loadUserScripts() {
+    const listContainer = document.getElementById('scripts-list-container');
+    if (!listContainer) return;
+    
+    let scripts = [];
+    try {
+        if (window.AndroidBridge && window.AndroidBridge.getScriptsJson) {
+            scripts = JSON.parse(window.AndroidBridge.getScriptsJson());
+        } else {
+            scripts = JSON.parse(localStorage.getItem('veloce_scripts') || '[]');
+        }
+    } catch (e) {
+        console.error("Error loading custom scripts:", e);
+    }
+    
+    listContainer.innerHTML = '';
+    if (scripts.length === 0) {
+        listContainer.innerHTML = `<div style="font-size:11px; color:#888888; text-align:center; padding:8px 0; border:1px dashed rgba(255,255,255,0.05); border-radius:6px;">暂无导入的用户脚本</div>`;
+        return;
+    }
+    
+    scripts.forEach(script => {
+        const item = document.createElement('div');
+        item.style.display = 'flex';
+        item.style.alignItems = 'center';
+        item.style.justifyContent = 'space-between';
+        item.style.background = 'rgba(255,255,255,0.03)';
+        item.style.border = '1px solid rgba(255,255,255,0.05)';
+        item.style.padding = '8px 12px';
+        item.style.borderRadius = '8px';
+        
+        const summaryCode = script.code ? script.code.substring(0, 30) + (script.code.length > 30 ? '...' : '') : '';
+        item.innerHTML = `
+            <div style="display:flex; flex-direction:column; min-width:0; flex:1; margin-right:8px; text-align:left;">
+                <span style="font-size:12px; font-weight:600; color:white; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${script.name}</span>
+                <span style="font-size:10px; color:#6b7280; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${summaryCode}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                ${script.url ? `
+                <button type="button" class="script-update-btn" data-id="${script.id}" style="background:none; border:none; color:#f59e0b; padding:2px; cursor:pointer; display:flex; align-items:center;" title="手动更新脚本">
+                    <i data-lucide="refresh-cw" style="width:13px;height:13px;"></i>
+                </button>
+                ` : ''}
+                <input type="checkbox" class="script-toggle" data-id="${script.id}" ${script.enabled ? 'checked' : ''} style="width:16px; height:16px; cursor:pointer;">
+                <button type="button" class="script-delete-btn" data-id="${script.id}" style="background:none; border:none; color:#ef4444; padding:2px; cursor:pointer; display:flex; align-items:center;">
+                    <i data-lucide="trash-2" style="width:13px;height:13px;"></i>
+                </button>
+            </div>
+        `;
+        listContainer.appendChild(item);
+    });
+    lucide.createIcons();
+}
+
+function saveUserScripts(scripts) {
+    try {
+        const json = JSON.stringify(scripts);
+        if (window.AndroidBridge && window.AndroidBridge.saveScriptsJson) {
+            window.AndroidBridge.saveScriptsJson(json);
+        } else {
+            localStorage.setItem('veloce_scripts', json);
+        }
+    } catch (e) {
+        console.error("Error saving custom scripts:", e);
+    }
+}
+
+async function importUserScript() {
+    const nameInput = document.getElementById('script-name-input');
+    const codeInput = document.getElementById('script-code-input');
+    const urlInput = document.getElementById('script-url-input');
+    if (!nameInput || !codeInput) return;
+    
+    const name = nameInput.value.trim();
+    let code = codeInput.value.trim();
+    const url = urlInput ? urlInput.value.trim() : '';
+    
+    if (!name) {
+        showToast('脚本名称不能为空', 'warning');
+        return;
+    }
+    
+    if (!code && !url) {
+        showToast('脚本代码和更新网址不能同时为空', 'warning');
+        return;
+    }
+    
+    if (url && !code) {
+        showToast('正在从网址获取脚本...', 'info');
+        try {
+            const response = await fetch(`/api/fetch_script?url=${encodeURIComponent(url)}`);
+            const data = await response.json();
+            if (data.success && data.code) {
+                code = data.code;
+            } else {
+                showToast(`获取脚本失败: ${data.error || '未知错误'}`, 'error');
+                return;
+            }
+        } catch (err) {
+            showToast(`获取脚本出错: ${err.message}`, 'error');
+            return;
+        }
+    }
+    
+    let scripts = [];
+    try {
+        if (window.AndroidBridge && window.AndroidBridge.getScriptsJson) {
+            scripts = JSON.parse(window.AndroidBridge.getScriptsJson());
+        } else {
+            scripts = JSON.parse(localStorage.getItem('veloce_scripts') || '[]');
+        }
+    } catch (e) {}
+    
+    const newScript = {
+        id: 'script_' + Date.now(),
+        name: name,
+        code: code,
+        enabled: true,
+        url: url || undefined,
+        lastUpdated: url ? Date.now() : undefined
+    };
+    
+    scripts.push(newScript);
+    saveUserScripts(scripts);
+    
+    nameInput.value = '';
+    codeInput.value = '';
+    if (urlInput) urlInput.value = '';
+    showToast('脚本导入成功，并已自动启用！', 'success');
+    loadUserScripts();
+}
+
+async function updateSingleScript(id) {
+    let scripts = [];
+    try {
+        if (window.AndroidBridge && window.AndroidBridge.getScriptsJson) {
+            scripts = JSON.parse(window.AndroidBridge.getScriptsJson());
+        } else {
+            scripts = JSON.parse(localStorage.getItem('veloce_scripts') || '[]');
+        }
+    } catch (e) {}
+    
+    const script = scripts.find(s => s.id === id);
+    if (!script || !script.url) {
+        showToast('未找到对应的更新网址', 'warning');
+        return;
+    }
+    
+    showToast(`正在更新脚本: ${script.name}...`, 'info');
+    try {
+        const response = await fetch(`/api/fetch_script?url=${encodeURIComponent(script.url)}`);
+        const data = await response.json();
+        if (data.success && data.code) {
+            script.code = data.code;
+            script.lastUpdated = Date.now();
+            saveUserScripts(scripts);
+            showToast(`已成功更新脚本: ${script.name}`, 'success');
+            loadUserScripts();
+        } else {
+            showToast(`更新脚本失败: ${data.error || '未知错误'}`, 'error');
+        }
+    } catch (err) {
+        showToast(`更新脚本出错: ${err.message}`, 'error');
+    }
+}
+
+async function updateUserScripts(force = false) {
+    let scripts = [];
+    try {
+        if (window.AndroidBridge && window.AndroidBridge.getScriptsJson) {
+            scripts = JSON.parse(window.AndroidBridge.getScriptsJson());
+        } else {
+            scripts = JSON.parse(localStorage.getItem('veloce_scripts') || '[]');
+        }
+    } catch (e) {}
+    
+    const urlScripts = scripts.filter(s => s.url);
+    if (urlScripts.length === 0) return;
+    
+    let updatedAny = false;
+    const interval = 12 * 60 * 60 * 1000;
+    const now = Date.now();
+    
+    for (const script of urlScripts) {
+        const timeSinceUpdate = now - (script.lastUpdated || 0);
+        if (force || timeSinceUpdate > interval) {
+            try {
+                const response = await fetch(`/api/fetch_script?url=${encodeURIComponent(script.url)}`);
+                const data = await response.json();
+                if (data.success && data.code) {
+                    script.code = data.code;
+                    script.lastUpdated = now;
+                    updatedAny = true;
+                }
+            } catch (err) {
+                console.error(`Auto-update failed for script ${script.name}:`, err);
+            }
+        }
+    }
+    
+    if (updatedAny) {
+        saveUserScripts(scripts);
+        loadUserScripts();
+        showToast('后台已自动更新订阅脚本', 'info');
+    }
+}
+
+function toggleUserScript(id, enabled) {
+    let scripts = [];
+    try {
+        if (window.AndroidBridge && window.AndroidBridge.getScriptsJson) {
+            scripts = JSON.parse(window.AndroidBridge.getScriptsJson());
+        } else {
+            scripts = JSON.parse(localStorage.getItem('veloce_scripts') || '[]');
+        }
+    } catch (e) {}
+    
+    scripts = scripts.map(s => {
+        if (s.id === id) {
+            s.enabled = enabled;
+        }
+        return s;
+    });
+    saveUserScripts(scripts);
+    showToast(enabled ? '脚本已启用' : '脚本已禁用', 'info');
+}
+
+function deleteUserScript(id) {
+    let scripts = [];
+    try {
+        if (window.AndroidBridge && window.AndroidBridge.getScriptsJson) {
+            scripts = JSON.parse(window.AndroidBridge.getScriptsJson());
+        } else {
+            scripts = JSON.parse(localStorage.getItem('veloce_scripts') || '[]');
+        }
+    } catch (e) {}
+    
+    scripts = scripts.filter(s => s.id !== id);
+    saveUserScripts(scripts);
+    showToast('脚本已物理删除', 'warning');
+    loadUserScripts();
 }
 
 async function pollProgress() {
@@ -843,8 +1116,13 @@ btnRevealDownloads.addEventListener('click', async () => {
 // Paste shortcut helper
 btnPaste.addEventListener('click', async () => {
     try {
-        // Read text from clipboard
-        const text = await navigator.clipboard.readText();
+        let text = '';
+        if (window.AndroidBridge && window.AndroidBridge.getClipboardText) {
+            text = window.AndroidBridge.getClipboardText();
+        } else {
+            // Read text from clipboard
+            text = await navigator.clipboard.readText();
+        }
         if (text) {
             urlInput.value = text.trim();
             showToast('已粘贴剪贴板内容', 'success');
@@ -965,6 +1243,66 @@ document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
     fetchSettings();
     loadHistory();
+    
+    // Bind script events
+    const btnImportScript = document.getElementById('btn-import-script');
+    if (btnImportScript) {
+        btnImportScript.addEventListener('click', importUserScript);
+    }
+
+    // Select JS file trigger
+    const btnSelectFile = document.getElementById('btn-select-file');
+    const scriptFileInput = document.getElementById('script-file-input');
+    if (btnSelectFile && scriptFileInput) {
+        btnSelectFile.addEventListener('click', () => {
+            scriptFileInput.click();
+        });
+        scriptFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                // Auto-fill script name (basename without extension)
+                const name = file.name.replace(/\.[^/.]+$/, "");
+                const nameInput = document.getElementById('script-name-input');
+                if (nameInput) nameInput.value = name;
+                
+                // Read content
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    const codeInput = document.getElementById('script-code-input');
+                    if (codeInput) codeInput.value = evt.target.result;
+                    showToast(`成功载入脚本文件: ${file.name}`, 'info');
+                };
+                reader.readAsText(file);
+            }
+        });
+    }
+    
+    const scriptsListContainer = document.getElementById('scripts-list-container');
+    if (scriptsListContainer) {
+        scriptsListContainer.addEventListener('change', (e) => {
+            if (e.target.classList.contains('script-toggle')) {
+                toggleUserScript(e.target.dataset.id, e.target.checked);
+            }
+        });
+        scriptsListContainer.addEventListener('click', (e) => {
+            const delBtn = e.target.closest('.script-delete-btn');
+            if (delBtn) {
+                deleteUserScript(delBtn.dataset.id);
+                return;
+            }
+            const updateBtn = e.target.closest('.script-update-btn');
+            if (updateBtn) {
+                updateSingleScript(updateBtn.dataset.id);
+                return;
+            }
+        });
+    }
+    
+    // Load initial userscripts
+    loadUserScripts();
+    
+    // Silent automatic updates check for scripts linked via URL
+    updateUserScripts(false);
     
     // Check if there are any active downloads running in the background upon startup
     startProgressPolling();

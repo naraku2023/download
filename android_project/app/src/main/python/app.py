@@ -877,6 +877,22 @@ def cancel_download_route():
     save_tasks_to_file()
     return jsonify({"success": True})
 
+@app.route('/api/fetch_script', methods=['GET'])
+def fetch_script():
+    url = request.args.get('url')
+    if not url:
+        return jsonify({"success": False, "error": "URL is required"}), 400
+    try:
+        import urllib.request
+        import ssl
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
+        ssl_context = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, timeout=12, context=ssl_context) as response:
+            code = response.read().decode('utf-8')
+            return jsonify({"success": True, "code": code})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/thumbnail', methods=['GET'])
 def get_local_thumbnail():
     filepath = request.args.get('path')

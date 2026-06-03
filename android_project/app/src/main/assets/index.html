@@ -93,8 +93,35 @@
                                 <input type="checkbox" id="popup-block-input" style="width: 18px; height: 18px; cursor: pointer;">
                             </div>
                             <small class="help-text" style="display:block; font-size:11px; line-height:1.3; margin-top:2px;">封锁 window.open 和内联点击自动劫持跳转，解决恶意垃圾浮窗骚扰。</small>
+                        <!-- Section: Custom User Scripts -->
+                        <div class="plugin-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 12px; margin-top: 10px;">
+                            <span style="font-size: 13px; font-weight: 600; color: #FFFFFF; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                                <i data-lucide="code-2" style="width:14px;height:14px;color:#f59e0b;"></i> 自定义用户脚本管理
+                            </span>
+                            
+                            <!-- Script List Container -->
+                            <div id="scripts-list-container" style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+                                <!-- Dynamically populated list of imported scripts -->
+                            </div>
+                            
+                            <!-- Import Script Form -->
+                            <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.03); border-radius: 6px; padding: 10px;">
+                                <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:8px;">
+                                    <input type="text" id="script-name-input" placeholder="脚本名称 (如: 视频下载增强脚本)" style="font-size:11px; padding:6px 8px; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.08); border-radius:4px; color:white;">
+                                    <textarea id="script-code-input" placeholder="请在此处粘贴 JavaScript 脚本代码..." rows="3" style="font-size:10px; font-family:monospace; padding:6px 8px; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.08); border-radius:4px; color:#a7f3d0; resize:vertical;"></textarea>
+                                    <input type="text" id="script-url-input" placeholder="脚本更新网址 (可选，链接网址可实现定期更新)" style="font-size:11px; padding:6px 8px; background:rgba(0,0,0,0.4); border:1px solid rgba(255,255,255,0.08); border-radius:4px; color:white;">
+                                </div>
+                                <div style="display:flex; gap:8px; margin-bottom:8px;">
+                                    <button type="button" class="dl-btn" id="btn-select-file" style="flex:1; justify-content:center; padding:6px; font-size:11px; border-color:rgba(255,255,255,0.15); color:white;">
+                                        <i data-lucide="file-code" style="width:12px;height:12px;margin-right:4px;"></i> 选择.js文件
+                                    </button>
+                                    <input type="file" id="script-file-input" accept=".js" style="display:none;">
+                                </div>
+                                <button type="button" class="dl-btn" id="btn-import-script" style="width:100%; justify-content:center; padding:6px; font-size:11px; border-color:rgba(245,158,11,0.3); color:#f59e0b;">
+                                    <i data-lucide="plus-circle" style="width:12px;height:12px;"></i> 导入并运行脚本
+                                </button>
+                            </div>
                         </div>
-
 
                     </div>
 

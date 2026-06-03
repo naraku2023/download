@@ -27,7 +27,7 @@
                 android:id="@+id/btn_back"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:src="@android:drawable/ic_media_previous"
+                android:src="@drawable/ic_arrow_back"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Back"
                 android:tint="#FFFFFF"/>
@@ -36,7 +36,7 @@
                 android:id="@+id/btn_refresh"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:src="@android:drawable/ic_menu_rotate"
+                android:src="@drawable/ic_refresh"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Refresh"
                 android:tint="#FFFFFF"
@@ -50,9 +50,11 @@
                 android:hint="输入网址或视频链接..."
                 android:textColor="#FFFFFF"
                 android:textColorHint="#888888"
-                android:background="#2C2C2C"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
+                android:background="@drawable/bg_search_bar"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:drawableStart="@drawable/ic_search"
+                android:drawablePadding="8dp"
                 android:imeOptions="actionGo"
                 android:inputType="textUri"
                 android:singleLine="true"/>
@@ -61,40 +63,31 @@
                 android:id="@+id/btn_go"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:src="@android:drawable/ic_media_play"
+                android:src="@drawable/ic_arrow_forward"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Go"
                 android:tint="#FFFFFF"/>
 
             <FrameLayout
-                android:id="@+id/btn_tabs_container"
+                android:id="@+id/btn_tabs"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:layout_marginStart="4dp"
-                android:background="?attr/selectableItemBackgroundBorderless">
-                
-                <ImageButton
-                    android:id="@+id/btn_tabs"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:src="@android:drawable/ic_menu_sort_by_size"
-                    android:background="@android:color/transparent"
-                    android:contentDescription="Tabs"
-                    android:tint="#FFFFFF"
-                    android:layout_gravity="center"/>
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true">
                 
                 <TextView
                     android:id="@+id/txt_tab_count"
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_tab_box"
                     android:textColor="#FFFFFF"
-                    android:textSize="9sp"
+                    android:textSize="10sp"
                     android:textStyle="bold"
                     android:gravity="center"
-                    android:text="1"
-                    android:layout_gravity="top|end"
-                    android:layout_marginTop="2dp"
-                    android:layout_marginEnd="2dp"/>
+                    android:text="1"/>
             </FrameLayout>
         </LinearLayout>
 

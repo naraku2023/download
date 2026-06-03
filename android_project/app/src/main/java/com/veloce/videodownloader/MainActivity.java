@@ -52,13 +52,14 @@ public class MainActivity extends AppCompatActivity {
     private FloatingActionButton downloadFab;
     private BottomNavigationView bottomNavigationView;
     
-    private android.widget.FrameLayout btnTabsContainer;
-    private android.widget.ImageButton btnTabs;
+    private android.widget.FrameLayout btnTabs;
     private TextView txtTabCount;
     
     private final List<String> detectedVideoUrls = new ArrayList<>();
     private boolean adBlockEnabled = true;
     private boolean popupBlockEnabled = false;
+    private android.webkit.ValueCallback<android.net.Uri[]> fileUploadCallback;
+    private final static int FILE_CHOOSER_REQUEST_CODE = 2002;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -88,15 +89,8 @@ public class MainActivity extends AppCompatActivity {
         downloadFab = findViewById(R.id.download_fab);
         bottomNavigationView = findViewById(R.id.bottom_navigation);
         
-        btnTabsContainer = findViewById(R.id.btn_tabs_container);
         btnTabs = findViewById(R.id.btn_tabs);
         txtTabCount = findViewById(R.id.txt_tab_count);
-        
-        // Programmatically style tab count bubble badge for rich visuals
-        android.graphics.drawable.GradientDrawable badgeGd = new android.graphics.drawable.GradientDrawable();
-        badgeGd.setColor(0xFFFF3B30); // Neon reddish-orange highlight
-        badgeGd.setCornerRadius(99f);
-        txtTabCount.setBackground(badgeGd);
 
         // 2. Start Python Flask server
         if (!Python.isStarted()) {
@@ -179,7 +173,11 @@ public class MainActivity extends AppCompatActivity {
                 downloadsWebView.setVisibility(View.VISIBLE);
                 settingsWebView.setVisibility(View.GONE);
                 downloadFab.hide();
-                downloadsWebView.loadUrl("file:///android_asset/index.html?view=downloads");
+                if (downloadsWebView.getUrl() == null) {
+                    downloadsWebView.loadUrl("file:///android_asset/index.html?view=downloads");
+                } else {
+                    downloadsWebView.evaluateJavascript("if (typeof loadHistory === 'function') { loadHistory(); } if (typeof startProgressPolling === 'function') { startProgressPolling(); }", null);
+                }
                 return true;
             } else if (itemId == R.id.nav_settings) {
                 topBar.setVisibility(View.GONE);
@@ -187,7 +185,11 @@ public class MainActivity extends AppCompatActivity {
                 downloadsWebView.setVisibility(View.GONE);
                 settingsWebView.setVisibility(View.VISIBLE);
                 downloadFab.hide();
-                settingsWebView.loadUrl("file:///android_asset/index.html?view=settings");
+                if (settingsWebView.getUrl() == null) {
+                    settingsWebView.loadUrl("file:///android_asset/index.html?view=settings");
+                } else {
+                    settingsWebView.evaluateJavascript("if (typeof fetchSettings === 'function') { fetchSettings(); }", null);
+                }
                 return true;
             }
             return false;
@@ -232,6 +234,7 @@ public class MainActivity extends AppCompatActivity {
         downloadSettings.setAllowUniversalAccessFromFileURLs(true);
         downloadSettings.setAllowFileAccessFromFileURLs(true);
         downloadsWebView.setWebViewClient(new WebViewClient());
+        setupFilePicker(downloadsWebView);
 
         // Setup Settings WebView
         WebSettings settingsSettings = settingsWebView.getSettings();
@@ -242,6 +245,7 @@ public class MainActivity extends AppCompatActivity {
         settingsSettings.setAllowUniversalAccessFromFileURLs(true);
         settingsSettings.setAllowFileAccessFromFileURLs(true);
         settingsWebView.setWebViewClient(new WebViewClient());
+        setupFilePicker(settingsWebView);
 
         // Register secure Javascript interface bridges on non-browser WebViews
         AndroidBridge bridge = new AndroidBridge();
@@ -585,7 +589,49 @@ public class MainActivity extends AppCompatActivity {
             });
         }
 
+        @android.webkit.JavascriptInterface
+        public String getClipboardText() {
+            final String[] result = new String[]{""};
+            final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+            runOnUiThread(() -> {
+                try {
+                    android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                    if (clipboard != null && clipboard.hasPrimaryClip()) {
+                        android.content.ClipData clip = clipboard.getPrimaryClip();
+                        if (clip != null && clip.getItemCount() > 0) {
+                            CharSequence text = clip.getItemAt(0).getText();
+                            if (text != null) {
+                                result[0] = text.toString();
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    latch.countDown();
+                }
+            });
+            try {
+                latch.await(1000, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            return result[0];
+        }
 
+        @android.webkit.JavascriptInterface
+        public void saveScriptsJson(String json) {
+            getSharedPreferences("veloce_browser_scripts", MODE_PRIVATE)
+                .edit()
+                .putString("saved_scripts", json)
+                .apply();
+        }
+
+        @android.webkit.JavascriptInterface
+        public String getScriptsJson() {
+            return getSharedPreferences("veloce_browser_scripts", MODE_PRIVATE)
+                .getString("saved_scripts", "[]");
+        }
     }
 
     // === Android Native Video Player Launcher ===
@@ -665,6 +711,7 @@ public class MainActivity extends AppCompatActivity {
         
         // Add JavaScript communication bridge
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
+        setupFilePicker(webView);
         
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -721,6 +768,11 @@ public class MainActivity extends AppCompatActivity {
                             updateFabStatus(true);
                         }
                     }
+                }
+                
+                // Inject custom userscripts if this is a remote page
+                if (pageUrl != null && !pageUrl.startsWith("file:///android_asset")) {
+                    injectCustomScripts(view);
                 }
             }
 
@@ -1045,7 +1097,78 @@ public class MainActivity extends AppCompatActivity {
         dialog.show();
     }
 
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FILE_CHOOSER_REQUEST_CODE) {
+            if (fileUploadCallback == null) return;
+            android.net.Uri[] results = null;
+            if (resultCode == RESULT_OK && data != null) {
+                String dataString = data.getDataString();
+                android.content.ClipData clipData = data.getClipData();
+                if (clipData != null) {
+                    results = new android.net.Uri[clipData.getItemCount()];
+                    for (int i = 0; i < clipData.getItemCount(); i++) {
+                        results[i] = clipData.getItemAt(i).getUri();
+                    }
+                } else if (dataString != null) {
+                    results = new android.net.Uri[]{android.net.Uri.parse(dataString)};
+                }
+            }
+            fileUploadCallback.onReceiveValue(results);
+            fileUploadCallback = null;
+        }
+    }
 
+    private void setupFilePicker(WebView webView) {
+        webView.setWebChromeClient(new android.webkit.WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView webView, 
+                                             android.webkit.ValueCallback<android.net.Uri[]> filePathCallback, 
+                                             android.webkit.WebChromeClient.FileChooserParams fileChooserParams) {
+                if (fileUploadCallback != null) {
+                    fileUploadCallback.onReceiveValue(null);
+                }
+                fileUploadCallback = filePathCallback;
+                
+                android.content.Intent intent = null;
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                    intent = fileChooserParams.createIntent();
+                } else {
+                    intent = new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT);
+                    intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+                    intent.setType("*/*");
+                }
+                
+                try {
+                    startActivityForResult(intent, FILE_CHOOSER_REQUEST_CODE);
+                } catch (android.content.ActivityNotFoundException e) {
+                    fileUploadCallback = null;
+                    return false;
+                }
+                return true;
+            }
+        });
+    }
+
+    private void injectCustomScripts(WebView view) {
+        try {
+            String scriptsJson = getSharedPreferences("veloce_browser_scripts", MODE_PRIVATE)
+                .getString("saved_scripts", "[]");
+            org.json.JSONArray array = new org.json.JSONArray(scriptsJson);
+            for (int i = 0; i < array.length(); i++) {
+                org.json.JSONObject script = array.getJSONObject(i);
+                if (script.optBoolean("enabled", true)) {
+                    String code = script.optString("code", "");
+                    if (!code.isEmpty()) {
+                        view.evaluateJavascript(code, null);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
     // === Lightweight High-Performance AdBlocker Helper Class ===
     private static class AdBlocker {
